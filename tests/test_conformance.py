@@ -17,6 +17,8 @@ import pytest
 
 from ario_proof.canonicalize import canonical_json
 from ario_proof.hash import sha256_hex
+from ario_proof.sign import public_key_hex, sign, signing_key_from_seed_hex
+from ario_proof.verify import verify_signature
 
 VECTORS_DIR = Path(__file__).resolve().parent.parent / "test-vectors"
 
@@ -126,6 +128,29 @@ def test_envelope_for_sig_jcs_bytes(path: Path) -> None:
         canonical_json(env).hex()
         == v["expected_outputs"]["envelope_for_sig_jcs_bytes_hex"]
     )
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_signature_reproduces_deterministically(path: Path) -> None:
+    v = load(path)
+    key = signing_key_from_seed_hex(v["fixed_keypair"]["ed25519_seed_hex"])
+    assert public_key_hex(key) == v["fixed_keypair"]["ed25519_public_hex"]
+    message = bytes.fromhex(v["expected_outputs"]["envelope_for_sig_jcs_bytes_hex"])
+    assert sign(message, key).hex() == v["expected_outputs"]["signature_hex"]
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_signature_verifies(path: Path) -> None:
+    v = load(path)
+    message = bytes.fromhex(v["expected_outputs"]["envelope_for_sig_jcs_bytes_hex"])
+    sig_hex = v["expected_outputs"]["signature_hex"]
+    pub_hex = v["fixed_keypair"]["ed25519_public_hex"]
+    assert verify_signature(message, sig_hex, pub_hex)
+    # Tampered message and forged signature must both fail.
+    assert not verify_signature(message + b" ", sig_hex, pub_hex)
+    forged = bytearray(bytes.fromhex(sig_hex))
+    forged[0] ^= 0xFF
+    assert not verify_signature(message, bytes(forged).hex(), pub_hex)
 
 
 @pytest.mark.parametrize("path", MERKLE_VECTOR_FILES, ids=lambda p: p.stem)
