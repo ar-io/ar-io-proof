@@ -18,6 +18,7 @@ import pytest
 from ario_proof.canonicalize import canonical_json
 from ario_proof.envelope import content_hashes, sign_envelope, verify_envelope
 from ario_proof.hash import sha256_hex
+from ario_proof.merkle import audit_path, leaf_hash, merkle_root, verify_inclusion
 from ario_proof.sign import public_key_hex, sign, signing_key_from_seed_hex
 from ario_proof.verify import verify_signature
 
@@ -231,3 +232,38 @@ def test_merkle_vector_structure(path: Path) -> None:
         assert 0 <= proof["leaf_index"] < v["leaf_count"]
         for sibling in proof["audit_path_hex"]:
             assert is_hex(sibling, 64)
+
+
+@pytest.mark.parametrize("path", MERKLE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_merkle_leaf_hashes(path: Path) -> None:
+    v = load(path)
+    for leaf in v["leaves"]:
+        computed = leaf_hash(canonical_json(leaf["leaf_object"]))
+        assert computed.hex() == leaf["leaf_hash_hex"]
+
+
+@pytest.mark.parametrize("path", MERKLE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_merkle_root_reconstructs(path: Path) -> None:
+    v = load(path)
+    hashes = [bytes.fromhex(leaf["leaf_hash_hex"]) for leaf in v["leaves"]]
+    assert merkle_root(hashes).hex() == v["expected_root_hex"]
+
+
+@pytest.mark.parametrize("path", MERKLE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_merkle_inclusion_proofs(path: Path) -> None:
+    v = load(path)
+    hashes = [bytes.fromhex(leaf["leaf_hash_hex"]) for leaf in v["leaves"]]
+    root = bytes.fromhex(v["expected_root_hex"])
+    for proof in v["inclusion_proofs"]:
+        i = proof["leaf_index"]
+        pinned_path = [bytes.fromhex(s) for s in proof["audit_path_hex"]]
+        # The pinned audit path verifies...
+        assert verify_inclusion(hashes[i], i, v["leaf_count"], pinned_path, root)
+        # ...and our generator reproduces it byte-for-byte.
+        assert audit_path(i, hashes) == pinned_path
+        # Negative: the path must not verify for a different leaf index.
+        if v["leaf_count"] > 1:
+            other = (i + 1) % v["leaf_count"]
+            assert not verify_inclusion(
+                hashes[other], other, v["leaf_count"], pinned_path, root
+            )
