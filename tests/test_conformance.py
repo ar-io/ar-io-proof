@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from ario_proof.canonicalize import canonical_json
+from ario_proof.envelope import content_hashes, sign_envelope, verify_envelope
 from ario_proof.hash import sha256_hex
 from ario_proof.sign import public_key_hex, sign, signing_key_from_seed_hex
 from ario_proof.verify import verify_signature
@@ -151,6 +152,67 @@ def test_signature_verifies(path: Path) -> None:
     forged = bytearray(bytes.fromhex(sig_hex))
     forged[0] ^= 0xFF
     assert not verify_signature(message, bytes(forged).hex(), pub_hex)
+
+
+def signed_envelope(v: dict) -> dict:
+    """The full signed envelope a vector describes."""
+    env = dict(v["inputs"]["envelope_pre_signature"])
+    env["payload_hash"] = v["expected_outputs"]["payload_hash_hex"]
+    env["public_key"] = v["fixed_keypair"]["ed25519_public_hex"]
+    env["signature"] = v["expected_outputs"]["signature_hex"]
+    return env
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_sign_envelope_reproduces_vector(path: Path) -> None:
+    v = load(path)
+    key = signing_key_from_seed_hex(v["fixed_keypair"]["ed25519_seed_hex"])
+    env = sign_envelope(dict(v["inputs"]["envelope_pre_signature"]), key)
+    assert env == signed_envelope(v)
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_verify_envelope_accepts_vector(path: Path) -> None:
+    result = verify_envelope(signed_envelope(load(path)))
+    assert result.ok
+    assert result.spec_version_ok
+    assert result.payload_hash_ok is True
+    assert result.signature_ok
+    assert result.errors == []
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_verify_envelope_rejects_tamper_and_forgery(path: Path) -> None:
+    v = load(path)
+
+    tampered = signed_envelope(v)
+    tampered["payload"] = dict(tampered["payload"], _injected="x")
+    assert not verify_envelope(tampered).ok
+
+    forged = signed_envelope(v)
+    sig = bytearray(bytes.fromhex(forged["signature"]))
+    sig[0] ^= 0xFF
+    forged["signature"] = bytes(sig).hex()
+    assert not verify_envelope(forged).ok
+
+    swapped = signed_envelope(v)
+    swapped["public_key"] = "00" * 32
+    assert not verify_envelope(swapped).ok
+
+    unknown = signed_envelope(v)
+    unknown["spec_version"] = "ario.agent/v99"
+    assert not verify_envelope(unknown).ok
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_content_bind_against_vector(path: Path) -> None:
+    env = signed_envelope(load(path))
+    for role, content_hash in content_hashes(env):
+        result = verify_envelope(env, expected_content_hash=content_hash)
+        assert result.content_hash_ok is True
+        assert result.content_role == role
+    result = verify_envelope(env, expected_content_hash="f" * 64)
+    assert result.content_hash_ok is False
 
 
 @pytest.mark.parametrize("path", MERKLE_VECTOR_FILES, ids=lambda p: p.stem)
