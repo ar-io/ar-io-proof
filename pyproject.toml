@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ar-io-proof"
+version = "0.1.0.dev0"
+description = "Verification kernel for the ar.io verification stack: RFC 8785 canonicalization, SHA-256, Ed25519 envelope sign/verify, RFC 9162 Merkle inclusion proofs."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "ar.io" }]
+keywords = ["arweave", "ar.io", "verification", "ed25519", "jcs", "rfc8785", "rfc9162", "merkle", "provenance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = [
+    "PyNaCl>=1.5.0",
+    "jcs>=0.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=24.0",
+]
+
+[project.urls]
+Repository = "https://github.com/ar-io/ar-io-proof"
+Issues = "https://github.com/ar-io/ar-io-proof/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ario_proof"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+target-version = ["py310", "py311", "py312", "py313"]
