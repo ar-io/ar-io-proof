@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from ario_proof.canonicalize import canonical_json
+from ario_proof.hash import sha256_hex
 
 VECTORS_DIR = Path(__file__).resolve().parent.parent / "test-vectors"
 
@@ -103,6 +104,15 @@ def test_payload_jcs_bytes(path: Path) -> None:
     payload = v["inputs"]["envelope_pre_signature"]["payload"]
     assert (
         canonical_json(payload).hex() == v["expected_outputs"]["payload_jcs_bytes_hex"]
+    )
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_payload_hash(path: Path) -> None:
+    v = load(path)
+    payload = v["inputs"]["envelope_pre_signature"]["payload"]
+    assert (
+        sha256_hex(canonical_json(payload)) == v["expected_outputs"]["payload_hash_hex"]
     )
 
 
