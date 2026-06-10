@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from ario_proof.canonicalize import canonical_json
+
 VECTORS_DIR = Path(__file__).resolve().parent.parent / "test-vectors"
 
 # Pinned from test-vectors/CORPUS-v1.md (corpus tag test-vectors-v1.0).
@@ -93,6 +95,27 @@ def test_envelope_vector_structure(path: Path) -> None:
     assert is_hex(out["payload_hash_hex"], 64)
     assert is_hex(out["envelope_for_sig_jcs_bytes_hex"])
     assert is_hex(out["signature_hex"], 128)
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_payload_jcs_bytes(path: Path) -> None:
+    v = load(path)
+    payload = v["inputs"]["envelope_pre_signature"]["payload"]
+    assert (
+        canonical_json(payload).hex() == v["expected_outputs"]["payload_jcs_bytes_hex"]
+    )
+
+
+@pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
+def test_envelope_for_sig_jcs_bytes(path: Path) -> None:
+    v = load(path)
+    env = dict(v["inputs"]["envelope_pre_signature"])
+    env["payload_hash"] = v["expected_outputs"]["payload_hash_hex"]
+    env["public_key"] = v["fixed_keypair"]["ed25519_public_hex"]
+    assert (
+        canonical_json(env).hex()
+        == v["expected_outputs"]["envelope_for_sig_jcs_bytes_hex"]
+    )
 
 
 @pytest.mark.parametrize("path", MERKLE_VECTOR_FILES, ids=lambda p: p.stem)
