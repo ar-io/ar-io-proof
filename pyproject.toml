@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ar-io-proof"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Verification kernel for the ar.io verification stack: RFC 8785 canonicalization, SHA-256, Ed25519 envelope sign/verify, RFC 9162 Merkle inclusion proofs."
 readme = "README.md"
 license = { file = "LICENSE" }
