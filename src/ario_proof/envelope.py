@@ -1,7 +1,8 @@
 """Verifiable Event Envelope assembly and verification.
 
-Implements the family contract (``envelope-spec.md`` v1.0, ratified
-2026-06-10) for the two accepted profiles:
+Implements the family contract (``envelope-spec.md`` v1.1 — ratified v1.0
+2026-06-10, amended 2026-06-11, additive, same conformance corpus) for the
+two accepted profiles:
 
 - ``ario.agent/v1`` — inline payload binding: the envelope carries
   ``payload`` and ``payload_hash = SHA-256(JCS(payload))``.
@@ -10,11 +11,14 @@ Implements the family contract (``envelope-spec.md`` v1.0, ratified
   check it.
 
 The signed scope is the envelope minus ``signature``, minus the reserved
-``co_signatures`` field (envelope-spec §7.1 — reserved in v1.0 and excluded
-from the signed scope from day one, even though the v1.0 corpus has no
-co-signed vectors), minus underscore-prefixed annotation keys (out-of-band
-routing metadata by mlflow convention, e.g. ``_tx_id``; agent envelopes
-carry none, so the strip is a no-op there).
+``co_signatures`` field (envelope-spec §7.1 — reserved and excluded from
+the signed scope from day one, even though the v1.0 corpus has no co-signed
+vectors), and — **for the mlflow profile and legacy envelopes only** —
+minus underscore-prefixed annotation keys (out-of-band routing metadata by
+mlflow convention, e.g. ``_tx_id``). The ``ario.agent/v1`` signed scope has
+no annotation convention and matches the Go reference exactly: an agent
+envelope with an injected ``_*`` key must FAIL signature verification, the
+same way any other unsigned-field injection does.
 
 Verification never raises on adversarial input — malformed envelopes return
 a failed :class:`VerificationResult`.
@@ -88,12 +92,20 @@ def spec_version_supported(spec_version: Any) -> bool:
 
 
 def envelope_for_signature(envelope: dict[str, Any]) -> dict[str, Any]:
-    """The signed scope: the envelope minus ``signature``/``co_signatures``
-    and minus underscore-prefixed annotation keys."""
+    """The signed scope: the envelope minus ``signature``/``co_signatures``.
+
+    Underscore-prefixed annotation keys are additionally stripped for the
+    ``ario.mlflow/v1`` profile and for legacy envelopes (no ``spec_version``)
+    — the mlflow convention treats ``_*`` as unsigned routing metadata. The
+    ``ario.agent/v1`` profile has no such convention: its ``_*`` keys (if
+    any) stay inside the signed scope, matching the Go reference.
+    """
+    spec_version = envelope.get("spec_version")
+    strip_annotations = spec_version is None or spec_version == "ario.mlflow/v1"
     return {
         k: v
         for k, v in envelope.items()
-        if k not in _UNSIGNED_FIELDS and not k.startswith("_")
+        if k not in _UNSIGNED_FIELDS and not (strip_annotations and k.startswith("_"))
     }
 
 

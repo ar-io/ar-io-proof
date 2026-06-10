@@ -109,10 +109,71 @@ def test_co_signatures_is_outside_the_signed_scope() -> None:
     assert verify_envelope(env).ok
 
 
-def test_underscore_annotations_are_outside_the_signed_scope() -> None:
-    env = agent_envelope()
+def test_mlflow_underscore_annotations_are_outside_the_signed_scope() -> None:
+    # mlflow convention: _* keys are unsigned routing metadata, attachable
+    # after signing without breaking verification.
+    env = mlflow_envelope(b"bytes")
     env["_tx_id"] = "some-arweave-tx"
     assert "_tx_id" not in envelope_for_signature(env)
+    assert verify_envelope(env).ok
+
+
+def test_agent_underscore_keys_are_inside_the_signed_scope() -> None:
+    # The agent profile has no annotation convention — its signed scope is
+    # minus signature/co_signatures ONLY, matching the Go reference. An
+    # injected _* key is unsigned-field injection and must fail. The corpus
+    # cannot catch this (no vector carries _* keys) — same class as the
+    # co_signatures gotcha above; do not remove this test.
+    env = agent_envelope()
+    env["_injected"] = "x"
+    assert "_injected" in envelope_for_signature(env)
+    result = verify_envelope(env)
+    assert not result.ok
+    assert not result.signature_ok
+
+
+def test_legacy_underscore_annotations_are_outside_the_signed_scope() -> None:
+    pre = {
+        "event_id": "550e8400-e29b-41d4-a716-446655440002",
+        "payload_hash": sha256_hex(b"bytes"),
+        "previous_hash": "GENESIS",
+    }
+    env = sign_envelope(pre, KEY)
+    env["_tx_id"] = "some-arweave-tx"
+    assert verify_envelope(env, allow_legacy=True).ok
+
+
+def test_sign_side_agent_underscore_key_is_signed() -> None:
+    # Signing an agent envelope that contains a _* key signs it like any
+    # other field: it verifies as-signed, and removing it afterwards breaks
+    # the signature (Go would behave identically).
+    pre = {
+        "spec_version": "ario.agent/v1",
+        "event_id": "550e8400-e29b-41d4-a716-446655440003",
+        "event_type": "asset_registered",
+        "subject": {"type": "agent", "tenant_id": "t", "agent_id": "a"},
+        "payload": {"asset": {"asset_id": "x"}, "hash": "ab" * 32},
+        "previous_hash": "GENESIS",
+        "signed_at": "2026-06-10T00:00:00.000Z",
+        "_note": "inside the signed scope",
+    }
+    env = sign_envelope(pre, KEY)
+    assert verify_envelope(env).ok
+    del env["_note"]
+    assert not verify_envelope(env).signature_ok
+
+
+def test_sign_side_mlflow_underscore_key_is_not_signed() -> None:
+    pre = {
+        "spec_version": "ario.mlflow/v1",
+        "event_id": "550e8400-e29b-41d4-a716-446655440004",
+        "payload_hash": sha256_hex(b"bytes"),
+        "previous_hash": "GENESIS",
+        "_note": "outside the signed scope",
+    }
+    env = sign_envelope(pre, KEY)
+    assert verify_envelope(env).ok
+    del env["_note"]  # annotations can be dropped or rewritten freely
     assert verify_envelope(env).ok
 
 

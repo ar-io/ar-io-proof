@@ -32,14 +32,16 @@ the vector.** Never edit vector files; re-sync only at a published corpus tag pe
 
 ## Spec pins (do not drift)
 
-- `envelope-spec.md` **v1.0 (ratified 2026-06-10)** — the family contract. Profiles accepted:
-  `ario.agent/v1` (inline payload) and `ario.mlflow/v1` (external commitment). Fail-closed on
-  unknown majors.
+- `envelope-spec.md` **v1.1 (ratified v1.0 2026-06-10, amended 2026-06-11 — additive, same
+  corpus tag)** — the family contract. Profiles accepted: `ario.agent/v1` (inline payload) and
+  `ario.mlflow/v1` (external commitment). Fail-closed on unknown majors.
 - Signed scope = the envelope minus **`signature`**, minus the reserved **`co_signatures`**
-  (envelope-spec §7.1 — the v1.0 corpus has no co_signatures vectors, so only unit tests guard
-  this; do not remove the strip because conformance still passes without it), minus
-  underscore-prefixed annotation keys (mlflow convention, e.g. `_tx_id`; no-op for agent
-  envelopes).
+  (envelope-spec §7.1), and — **profile-conditional** — minus underscore-prefixed annotation
+  keys for `ario.mlflow/v1` + legacy envelopes ONLY (mlflow convention, e.g. `_tx_id`). The
+  `ario.agent/v1` scope is minus-signature/co_signatures only, matching Go: an injected `_*`
+  key on an agent envelope MUST fail verification. The corpus can catch neither the
+  co_signatures strip nor the profile-conditionality — unit tests in `tests/test_envelope.py`
+  are the only guard; do not remove them because conformance still passes without them.
 - Merkle: RFC 9162 §2.1 domain separation (`0x00` leaf / `0x01` node), empty-tree root =
   `SHA-256("")`. Never the Bitcoin duplicate-last-leaf variant.
 - Ed25519 is strict RFC 8032 (libsodium via PyNaCl) — matches Go `crypto/ed25519` and the JS

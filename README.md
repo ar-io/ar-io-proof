@@ -74,8 +74,9 @@ envelope = sign_envelope(
 
 ## What this package implements
 
-- The **Verifiable Event Envelope** family contract, `envelope-spec.md` **v1.0 (ratified
-  2026-06-10)**, for two profiles:
+- The **Verifiable Event Envelope** family contract, `envelope-spec.md` **v1.1 (ratified
+  v1.0 2026-06-10, amended 2026-06-11 — additive, same conformance corpus)**, for two
+  profiles:
   - **`ario.agent/v1`** — inline-payload envelopes minted by
     [`ar-io-agent`](https://github.com/ar-io/ar-io-agent) (byte-level format:
     `docs/artifact.md`).
@@ -88,8 +89,10 @@ envelope = sign_envelope(
   anything else. Envelopes that predate `spec_version` verify only with an explicit
   `allow_legacy=True`.
 - The signed scope per the ratified contract: the envelope minus `signature`, minus the
-  reserved `co_signatures` field (envelope-spec §7.1), minus underscore-prefixed annotation
-  keys.
+  reserved `co_signatures` field (envelope-spec §7.1), and — for `ario.mlflow/v1` and
+  legacy envelopes only — minus underscore-prefixed annotation keys. The `ario.agent/v1`
+  signed scope is minus `signature`/`co_signatures` only, matching the Go reference
+  byte-for-byte.
 
 The kernel is exactly the five primitives in the stack architecture's kernel scope — **no
 I/O, no networking, no key lifecycle**. Gateway fetching, attestation polling, and key
