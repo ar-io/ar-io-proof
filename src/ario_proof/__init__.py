@@ -6,6 +6,7 @@ profiles, plus the RFC 9162 binary Merkle tree behind agent verification
 checkpoints. Conformance-gated against the ``test-vectors-v1.0`` corpus.
 """
 
+from .bundle import BUNDLE_SPEC_VERSION, BundleVerificationResult, verify_proof_bundle
 from .canonicalize import canonical_json, normalize_floats
 from .envelope import (
     ACCEPTED_SPEC_VERSIONS,
@@ -17,6 +18,14 @@ from .envelope import (
     verify_envelope,
 )
 from .hash import sha256_hex
+from .merkle import (
+    EMPTY_TREE_ROOT_HEX,
+    audit_path,
+    leaf_hash,
+    merkle_root,
+    node_hash,
+    verify_inclusion,
+)
 from .sign import public_key_hex, sign, signing_key_from_seed_hex
 from .verify import verify_signature
 
@@ -25,7 +34,16 @@ __version__ = "0.1.0.dev0"
 __all__ = [
     "__version__",
     "ACCEPTED_SPEC_VERSIONS",
+    "BUNDLE_SPEC_VERSION",
+    "BundleVerificationResult",
+    "EMPTY_TREE_ROOT_HEX",
     "VerificationResult",
+    "audit_path",
+    "leaf_hash",
+    "merkle_root",
+    "node_hash",
+    "verify_inclusion",
+    "verify_proof_bundle",
     "canonical_json",
     "content_hashes",
     "envelope_for_signature",
