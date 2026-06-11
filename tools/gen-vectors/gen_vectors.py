@@ -384,6 +384,254 @@ MERKLE_VECTORS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# ario.events/v1 vectors (corpus v1.1 candidates)
+#
+# The Anchoring SDK profile (sibling repo ar-io-anchor,
+# docs/profile-ario.events-v1.md): EXTERNAL COMMITMENT + MINIMAL disclosure.
+# The committed payload is a caller-retained "event record"; the on-chain
+# envelope is the bare skeleton (no event_type / subject / previous_hash /
+# payload) plus the REQUIRED `environment` field and optional `payload_ref`.
+#
+# Written into the ario.events-v1/ SUBDIRECTORY so the v1.0 top-level set —
+# and every conformance gate pinned to it — is untouched until the
+# test-vectors-v1.1 tag ceremony folds these in.
+# ---------------------------------------------------------------------------
+
+EVENTS_SPEC_VERSION = "ario.events/v1"
+
+
+def sign_events_envelope_vector(
+    *,
+    vector_id: str,
+    description: str,
+    event_record: dict,
+    envelope_pre_signature: dict,
+    seed_hex: str = FIXED_SEED_HEX,
+) -> dict:
+    """Compute expected outputs for an external-commitment events vector.
+
+    Mirrors the producer steps in ar-io-anchor docs/profile-ario.events-v1.md:
+      1. JCS(event_record)          -> payload_jcs_bytes   (caller retains)
+      2. SHA-256(payload_jcs)       -> payload_hash
+      3. skeleton + payload_hash + public_key (NO payload, NO disclosure
+         fields — Minimal mode) -> JCS -> envelope_for_sig_jcs_bytes
+      4. Ed25519 sign               -> signature
+      5. JCS(complete envelope)     -> envelope_jcs_bytes  (the upload bytes)
+    """
+    seed = bytes.fromhex(seed_hex)
+    sk = SigningKey(seed)
+    pub_hex = sk.verify_key.encode().hex()
+
+    payload_jcs = jcs.canonicalize(event_record)
+    payload_hash = hashlib.sha256(payload_jcs).hexdigest()
+
+    env = {k: v for k, v in envelope_pre_signature.items()}
+    env["payload_hash"] = payload_hash
+    env["public_key"] = pub_hex
+    env.pop("signature", None)
+
+    env_for_sig_jcs = jcs.canonicalize(env)
+    signature = sk.sign(env_for_sig_jcs).signature.hex()
+
+    complete = {k: v for k, v in env.items()}
+    complete["signature"] = signature
+    envelope_jcs = jcs.canonicalize(complete)
+
+    return {
+        "vector_id": vector_id,
+        "description": description,
+        "spec_version": EVENTS_SPEC_VERSION,
+        "profile": {"payload_mode": "external_commitment", "disclosure": "minimal"},
+        "fixed_keypair": {
+            "ed25519_seed_hex": seed_hex,
+            "ed25519_public_hex": pub_hex,
+        },
+        "inputs": {
+            "event_record": event_record,
+            "envelope_pre_signature": envelope_pre_signature,
+        },
+        "expected_outputs": {
+            "payload_jcs_bytes_hex": payload_jcs.hex(),
+            "payload_hash_hex": payload_hash,
+            "envelope_for_sig_jcs_bytes_hex": env_for_sig_jcs.hex(),
+            "signature_hex": signature,
+            "envelope_jcs_bytes_hex": envelope_jcs.hex(),
+        },
+    }
+
+
+def events_vectors() -> list[dict]:
+    """Build the ario.events/v1 vector set (deterministic, chained)."""
+    subject = {"type": "producer", "producer_id": "acme-app"}
+
+    # --- events-event-01: unchained single-shot, dev, payload_ref + metadata.
+    content_1 = b"hello world"
+    record_1 = {
+        "payload_version": 1,
+        "spec_version": EVENTS_SPEC_VERSION,
+        "event_type": "event",
+        "subject": subject,
+        "previous_hash": "GENESIS",
+        "event": {
+            "content_hash": hashlib.sha256(content_1).hexdigest(),
+            "content_length": len(content_1),
+            "ref": "s3://demo-bucket/hello.txt",
+        },
+        "context": {},
+        "metadata": {"approver": "alice", "note": "first anchor — ünïcode ✓"},
+        "extras": {},
+    }
+    vec_1 = sign_events_envelope_vector(
+        vector_id="events-event-01",
+        description=(
+            "Unchained ario.events/v1 event: Minimal-mode skeleton envelope, "
+            "external-commitment record with caller metadata (JCS unicode "
+            "exercise), payload_ref locator, environment=dev"
+        ),
+        event_record=record_1,
+        envelope_pre_signature={
+            "spec_version": EVENTS_SPEC_VERSION,
+            "event_id": "1f0e9a4c-3b2d-4d5e-8f6a-7b8c9d0e1f2a",
+            "signed_at": "2026-06-11T00:00:00.000Z",
+            "environment": "dev",
+            "payload_ref": "s3://demo-bucket/hello.txt.provenance.json",
+        },
+    )
+
+    # --- events-event-02: chained to record 1, production, no optionals.
+    content_2 = b"hello again"
+    record_2 = {
+        "payload_version": 1,
+        "spec_version": EVENTS_SPEC_VERSION,
+        "event_type": "s3.object_stored",
+        "subject": subject,
+        "previous_hash": vec_1["expected_outputs"]["payload_hash_hex"],
+        "event": {
+            "content_hash": hashlib.sha256(content_2).hexdigest(),
+            "content_length": len(content_2),
+        },
+        "context": {"chain_key": "orders"},
+        "metadata": {},
+        "extras": {},
+    }
+    vec_2 = sign_events_envelope_vector(
+        vector_id="events-event-02",
+        description=(
+            "Chained ario.events/v1 event (adapter-namespaced type): "
+            "previous_hash links to events-event-01 record, chain_key in "
+            "context, environment=production, no optional envelope fields"
+        ),
+        event_record=record_2,
+        envelope_pre_signature={
+            "spec_version": EVENTS_SPEC_VERSION,
+            "event_id": "2a1b3c4d-5e6f-4a7b-9c8d-0e1f2a3b4c5d",
+            "signed_at": "2026-06-11T00:01:00.000Z",
+            "environment": "production",
+        },
+    )
+
+    # --- events-checkpoint-01: three leaf envelopes -> RFC 9162 tree ->
+    # checkpoint record + envelope. Leaf = leaf_hash over the COMPLETE signed
+    # leaf envelope (JCS bytes), committing to the signature too.
+    leaf_envelopes = []
+    leaf_vectors = []
+    for i in range(3):
+        content = f"leaf-{i}".encode()
+        record = {
+            "payload_version": 1,
+            "spec_version": EVENTS_SPEC_VERSION,
+            "event_type": "event",
+            "subject": subject,
+            "previous_hash": "GENESIS",
+            "event": {
+                "content_hash": hashlib.sha256(content).hexdigest(),
+                "content_length": len(content),
+            },
+            "context": {},
+            "metadata": {},
+            "extras": {},
+        }
+        vec = sign_events_envelope_vector(
+            vector_id=f"events-checkpoint-01-leaf-{i}",
+            description=f"checkpoint leaf {i} (not written standalone)",
+            event_record=record,
+            envelope_pre_signature={
+                "spec_version": EVENTS_SPEC_VERSION,
+                "event_id": f"3b2c4d5e-6f7a-4b8c-8d9e-{i:012d}",
+                "signed_at": f"2026-06-11T00:02:0{i}.000Z",
+                "environment": "dev",
+            },
+        )
+        envelope = dict(vec["inputs"]["envelope_pre_signature"])
+        envelope["payload_hash"] = vec["expected_outputs"]["payload_hash_hex"]
+        envelope["public_key"] = vec["fixed_keypair"]["ed25519_public_hex"]
+        envelope["signature"] = vec["expected_outputs"]["signature_hex"]
+        leaf_envelopes.append(envelope)
+        leaf_vectors.append(vec)
+
+    hashes = [leaf_hash(env) for env in leaf_envelopes]
+    root = mth(hashes)
+
+    checkpoint_record = {
+        "payload_version": 1,
+        "spec_version": EVENTS_SPEC_VERSION,
+        "event_type": "checkpoint",
+        "subject": subject,
+        "previous_hash": "GENESIS",
+        "event": {
+            "merkle_root": root.hex(),
+            "leaf_count": len(leaf_envelopes),
+            "window": {
+                "start": "2026-06-11T00:02:00.000Z",
+                "end": "2026-06-11T00:03:00.000Z",
+            },
+        },
+        "context": {"chain_key": "batcher:demo"},
+        "metadata": {},
+        "extras": {},
+    }
+    checkpoint_vec = sign_events_envelope_vector(
+        vector_id="events-checkpoint-01",
+        description=(
+            "ario.events/v1 Merkle checkpoint: three signed leaf envelopes, "
+            "RFC 9162 leaf hashes over the complete leaf-envelope JCS bytes, "
+            "root committed in the checkpoint record, inclusion proofs for "
+            "every leaf"
+        ),
+        event_record=checkpoint_record,
+        envelope_pre_signature={
+            "spec_version": EVENTS_SPEC_VERSION,
+            "event_id": "4c3d5e6f-7a8b-4c9d-a0e1-f2a3b4c5d6e7",
+            "signed_at": "2026-06-11T00:03:00.500Z",
+            "environment": "dev",
+        },
+    )
+    checkpoint_vec["merkle"] = {
+        "leaves": [
+            {
+                "event_record": leaf_vectors[i]["inputs"]["event_record"],
+                "envelope": leaf_envelopes[i],
+                "envelope_jcs_bytes_hex": leaf_vectors[i]["expected_outputs"][
+                    "envelope_jcs_bytes_hex"
+                ],
+                "leaf_hash_hex": hashes[i].hex(),
+            }
+            for i in range(3)
+        ],
+        "expected_root_hex": root.hex(),
+        "inclusion_proofs": [
+            {
+                "leaf_index": i,
+                "audit_path_hex": [h.hex() for h in audit_path(i, hashes)],
+            }
+            for i in range(3)
+        ],
+    }
+
+    return [vec_1, vec_2, checkpoint_vec]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output_dir", type=Path, help="where to write vector JSON files")
@@ -397,6 +645,14 @@ def main() -> int:
         out.write_text(json.dumps(vec, indent=2, sort_keys=True) + "\n")
         written += 1
         print(f"  wrote {out.name}")
+
+    events_dir = args.output_dir / "ario.events-v1"
+    events_dir.mkdir(parents=True, exist_ok=True)
+    for vec in events_vectors():
+        out = events_dir / f"{vec['vector_id']}.json"
+        out.write_text(json.dumps(vec, indent=2, sort_keys=True) + "\n")
+        written += 1
+        print(f"  wrote ario.events-v1/{out.name}")
 
     for spec in MERKLE_VECTORS:
         leaves = make_leaves(spec["n"])
