@@ -46,6 +46,21 @@ CORPUS_SHA256 = {
 ENVELOPE_VECTOR_FILES = sorted(VECTORS_DIR.glob("envelope-*.json"))
 MERKLE_VECTOR_FILES = sorted(VECTORS_DIR.glob("merkle-tree-*.json"))
 
+# ario.events/v1 (proposed profile, envelope-spec v1.2) — the corpus v1.1
+# additive set, homed in a profile subdirectory. Gated at the PRIMITIVE level
+# (canonical bytes + payload hash + Ed25519 + RFC 9162 Merkle), deliberately
+# NOT through verify_envelope: ario.events/v1 is external-commitment + Minimal
+# and is not in the accept-set, so the profile accept-gate would correctly
+# reject it. Pinned from test-vectors/CORPUS-v1.md (corpus tag test-vectors-v1.1).
+EVENTS_DIR = VECTORS_DIR / "ario.events-v1"
+CORPUS_EVENTS_SHA256 = {
+    "events-event-01.json": "ac4f81cf4be28da92ac49fe2461084598dde876a28d252bf997005f34b8903e4",
+    "events-event-02.json": "d1ab4b6f3cb6ab1f5f33e345a2c6f80c99bedbf10c9ec482ff8a45279e49fb27",
+    "events-checkpoint-01.json": "ae133294320974611c3952befa7f09ac58e6236027bd59cc82f5ab4f01d4bc12",
+}
+EVENTS_EVENT_FILES = sorted(EVENTS_DIR.glob("events-event-*.json"))
+EVENTS_CHECKPOINT_FILES = sorted(EVENTS_DIR.glob("events-checkpoint-*.json"))
+
 
 def load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -75,6 +90,82 @@ def test_corpus_complete() -> None:
     assert vector_files == expected
     assert len(ENVELOPE_VECTOR_FILES) == 6
     assert len(MERKLE_VECTOR_FILES) == 7
+    # corpus v1.1 additive set: the ario.events/v1 profile subdirectory.
+    event_files = {p.name for p in EVENTS_DIR.glob("*.json")}
+    assert event_files == set(CORPUS_EVENTS_SHA256)
+    assert len(EVENTS_EVENT_FILES) == 2
+    assert len(EVENTS_CHECKPOINT_FILES) == 1
+
+
+@pytest.mark.parametrize("name", sorted(CORPUS_EVENTS_SHA256))
+def test_corpus_integrity_events(name: str) -> None:
+    digest = hashlib.sha256((EVENTS_DIR / name).read_bytes()).hexdigest()
+    assert (
+        digest == CORPUS_EVENTS_SHA256[name]
+    ), f"events vector {name} drifted from test-vectors-v1.1"
+
+
+def _gate_events_envelope(v: dict) -> None:
+    """Re-derive an ario.events/v1 envelope's outputs from inputs, primitive
+    level. The committed payload is the external ``event_record`` (Minimal
+    disclosure → external commitment); the on-wire envelope carries only its
+    ``payload_hash`` + a ``payload_ref`` locator, never the record inline."""
+    out = v["expected_outputs"]
+    kp = v["fixed_keypair"]
+    record = v["inputs"]["event_record"]
+    assert canonical_json(record).hex() == out["payload_jcs_bytes_hex"]
+    assert sha256_hex(canonical_json(record)) == out["payload_hash_hex"]
+
+    env = dict(v["inputs"]["envelope_pre_signature"])
+    assert "payload" not in env  # external commitment: no inline payload
+    assert "payload_hash" not in env and "public_key" not in env
+    env["payload_hash"] = out["payload_hash_hex"]
+    env["public_key"] = kp["ed25519_public_hex"]
+    assert canonical_json(env).hex() == out["envelope_for_sig_jcs_bytes_hex"]
+
+    key = signing_key_from_seed_hex(kp["ed25519_seed_hex"])
+    assert public_key_hex(key) == kp["ed25519_public_hex"]
+    message = bytes.fromhex(out["envelope_for_sig_jcs_bytes_hex"])
+    assert sign(message, key).hex() == out["signature_hex"]
+    assert verify_signature(message, out["signature_hex"], kp["ed25519_public_hex"])
+    # Tamper + forgery must both fail.
+    assert not verify_signature(message + b" ", out["signature_hex"], kp["ed25519_public_hex"])
+    forged = bytearray(bytes.fromhex(out["signature_hex"]))
+    forged[0] ^= 0xFF
+    assert not verify_signature(message, bytes(forged).hex(), kp["ed25519_public_hex"])
+
+
+@pytest.mark.parametrize("path", EVENTS_EVENT_FILES, ids=lambda p: p.stem)
+def test_events_event_vector(path: Path) -> None:
+    v = load(path)
+    assert v["spec_version"] == "ario.events/v1"
+    assert v["vector_id"] == path.stem
+    _gate_events_envelope(v)
+
+
+@pytest.mark.parametrize("path", EVENTS_CHECKPOINT_FILES, ids=lambda p: p.stem)
+def test_events_checkpoint_vector(path: Path) -> None:
+    v = load(path)
+    assert v["spec_version"] == "ario.events/v1"
+    # The checkpoint record is itself a signed ario.events/v1 envelope.
+    _gate_events_envelope(v)
+
+    m = v["merkle"]
+    # RFC 9162 leaf hashes over each leaf-envelope's complete JCS bytes.
+    hashes = []
+    for leaf in m["leaves"]:
+        h = leaf_hash(bytes.fromhex(leaf["envelope_jcs_bytes_hex"]))
+        assert h.hex() == leaf["leaf_hash_hex"]
+        hashes.append(h)
+    root = bytes.fromhex(m["expected_root_hex"])
+    assert merkle_root(hashes).hex() == m["expected_root_hex"]
+    for proof in m["inclusion_proofs"]:
+        i = proof["leaf_index"]
+        audit = [bytes.fromhex(s) for s in proof["audit_path_hex"]]
+        assert verify_inclusion(hashes[i], i, len(hashes), audit, root)
+        # A wrong leaf index must not verify against the pinned path.
+        wrong = (i + 1) % len(hashes)
+        assert not verify_inclusion(hashes[wrong], i, len(hashes), audit, root) or wrong == i
 
 
 @pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)

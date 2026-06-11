@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { bytesToHex, hexToBytes, sha256Hex, utf8 } from "../src/crypto";
+import { bytesToHex, ed25519Verify, hexToBytes, sha256Hex, utf8 } from "../src/crypto";
 import {
   EMPTY_TREE_ROOT_HEX,
   auditPath,
@@ -218,4 +218,124 @@ describe("merkle conformance vs ar-io-agent test-vectors", () => {
   it("auditPath rejects an out-of-range index", async () => {
     await expect(auditPath(5, [new Uint8Array(32)])).rejects.toThrow(/out of range/);
   });
+});
+
+// --- ario.events/v1 conformance (corpus v1.1 additive set) ------------------
+//
+// The Anchoring SDK's profile (envelope-spec v1.2, registered *proposed*).
+// Gated at the PRIMITIVE level (canonical bytes + payload hash + Ed25519 +
+// RFC 9162 Merkle), NOT through verifyEnvelope: ario.events/v1 is
+// external-commitment + Minimal and is not in the accept-set, so the profile
+// accept-gate correctly rejects it. The committed payload is the external
+// `event_record`; the on-wire envelope carries only its payload_hash + a
+// payload_ref locator. Python reproduces signatures from the seed; TS (a
+// verify-only kernel) independently verifies them — the cross-language gate.
+const CORPUS_EVENTS_SHA256: Record<string, string> = {
+  "events-event-01.json": "ac4f81cf4be28da92ac49fe2461084598dde876a28d252bf997005f34b8903e4",
+  "events-event-02.json": "d1ab4b6f3cb6ab1f5f33e345a2c6f80c99bedbf10c9ec482ff8a45279e49fb27",
+  "events-checkpoint-01.json": "ae133294320974611c3952befa7f09ac58e6236027bd59cc82f5ab4f01d4bc12",
+};
+const eventsDir = fileURLToPath(new URL("../../test-vectors/ario.events-v1/", import.meta.url));
+
+interface EventsVector {
+  vector_id: string;
+  spec_version: string;
+  inputs: {
+    envelope_pre_signature: Record<string, unknown>;
+    event_record: Record<string, unknown>;
+  };
+  fixed_keypair: { ed25519_public_hex: string };
+  expected_outputs: {
+    payload_jcs_bytes_hex: string;
+    payload_hash_hex: string;
+    envelope_for_sig_jcs_bytes_hex: string;
+    signature_hex: string;
+  };
+  merkle?: {
+    expected_root_hex: string;
+    leaves: { envelope_jcs_bytes_hex: string; leaf_hash_hex: string }[];
+    inclusion_proofs: { leaf_index: number; audit_path_hex: string[] }[];
+  };
+}
+
+function loadEvents(prefix: string): EventsVector[] {
+  return readdirSync(eventsDir)
+    .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
+    .sort()
+    .map((f) => JSON.parse(readFileSync(`${eventsDir}${f}`, "utf8")) as EventsVector);
+}
+
+async function gateEventsEnvelope(v: EventsVector): Promise<void> {
+  const out = v.expected_outputs;
+  const pub = v.fixed_keypair.ed25519_public_hex;
+  // payload = the external event_record (Minimal → external commitment).
+  expect(bytesToHex(utf8(jcs(v.inputs.event_record)))).toBe(out.payload_jcs_bytes_hex);
+  expect(await sha256Hex(utf8(jcs(v.inputs.event_record)))).toBe(out.payload_hash_hex);
+  // signer injects payload_hash + public_key; vectors must not pre-bake them.
+  const pre = v.inputs.envelope_pre_signature;
+  expect("payload" in pre || "payload_hash" in pre || "public_key" in pre).toBe(false);
+  const forSig = { ...pre, payload_hash: out.payload_hash_hex, public_key: pub };
+  expect(bytesToHex(utf8(jcs(forSig)))).toBe(out.envelope_for_sig_jcs_bytes_hex);
+  // signature verifies over the for-sig bytes; tamper + forgery both fail.
+  const msg = hexToBytes(out.envelope_for_sig_jcs_bytes_hex);
+  expect(await ed25519Verify(out.signature_hex, msg, pub)).toBe(true);
+  expect(await ed25519Verify(out.signature_hex, utf8(bytesToHex(msg) + "00"), pub)).toBe(false);
+  const forged = out.signature_hex.slice(0, -2) + (out.signature_hex.slice(-2) === "00" ? "ff" : "00");
+  expect(await ed25519Verify(forged, msg, pub)).toBe(false);
+}
+
+describe("corpus integrity (test-vectors-v1.1 — ario.events/v1)", () => {
+  for (const [name, expected] of Object.entries(CORPUS_EVENTS_SHA256)) {
+    it(`${name} matches its pinned digest`, () => {
+      const digest = createHash("sha256").update(readFileSync(`${eventsDir}${name}`)).digest("hex");
+      expect(digest, `events vector ${name} drifted from test-vectors-v1.1`).toBe(expected);
+    });
+  }
+  it("the events set is complete — no missing or extra files", () => {
+    const onDisk = readdirSync(eventsDir).filter((f) => f.endsWith(".json")).sort();
+    expect(onDisk).toEqual(Object.keys(CORPUS_EVENTS_SHA256).sort());
+  });
+});
+
+describe("ario.events/v1 event conformance", () => {
+  const events = loadEvents("events-event-");
+  it("has both event vectors", () => expect(events).toHaveLength(2));
+  for (const v of events) {
+    it(`${v.vector_id} re-derives + verifies`, async () => {
+      expect(v.spec_version).toBe("ario.events/v1");
+      await gateEventsEnvelope(v);
+    });
+  }
+});
+
+describe("ario.events/v1 checkpoint conformance (RFC 9162 Merkle)", () => {
+  for (const v of loadEvents("events-checkpoint-")) {
+    describe(v.vector_id, () => {
+      it("the checkpoint record is a valid signed envelope", async () => {
+        expect(v.spec_version).toBe("ario.events/v1");
+        await gateEventsEnvelope(v);
+      });
+      it("leaf hashes, root, and inclusion proofs reconstruct", async () => {
+        const m = v.merkle!;
+        const hashes: Uint8Array[] = [];
+        for (const leaf of m.leaves) {
+          const h = await leafHash(hexToBytes(leaf.envelope_jcs_bytes_hex));
+          expect(bytesToHex(h)).toBe(leaf.leaf_hash_hex);
+          hashes.push(h);
+        }
+        expect(bytesToHex(await merkleRoot(hashes))).toBe(m.expected_root_hex);
+        const root = hexToBytes(m.expected_root_hex);
+        for (const proof of m.inclusion_proofs) {
+          const i = proof.leaf_index;
+          const pinned = proof.audit_path_hex.map(hexToBytes);
+          expect(await verifyInclusion(hashes[i], i, hashes.length, pinned, root)).toBe(true);
+          expect((await auditPath(i, hashes)).map(bytesToHex)).toEqual(proof.audit_path_hex);
+          if (hashes.length > 1) {
+            const other = (i + 1) % hashes.length;
+            expect(await verifyInclusion(hashes[other], other, hashes.length, pinned, root)).toBe(false);
+          }
+        }
+      });
+    });
+  }
 });

@@ -1,6 +1,6 @@
-# Conformance corpus — v1.0
+# Conformance corpus — v1.0 (+ v1.1 additive set)
 
-> **Corpus tag: `test-vectors-v1.0`** (annotated git tag on the commit that adds this file). Locked at the standards ratification of 2026-06-10 per [`docs/stack/governance.md`](../docs/stack/governance.md) §4: corpus changes from here are minor bumps (`test-vectors-v1.x`); any change to the bytes of a file listed below is major (`test-vectors-v2.0`, 30-day RFC). Every conformant downstream pins a corpus tag and records which.
+> **Corpus tag: `test-vectors-v1.0`**, extended by **`test-vectors-v1.1`** (the additive `ario.events/v1` set in [§ Contents added at v1.1](#contents-added-at-v11)). Locked at the standards ratification of 2026-06-10 per [`docs/stack/governance.md`](../docs/stack/governance.md) §4: corpus changes from here are minor bumps (`test-vectors-v1.x`); any change to the bytes of a file listed below is major (`test-vectors-v2.0`, 30-day RFC). Every conformant downstream pins a corpus tag and records which. v1.1 is **purely additive** — every v1.0 vector is byte-unchanged, so a v1.0 pin stays valid; downstreams adopt v1.1 only to gate the new `ario.events/v1` profile.
 
 ## Scope
 
@@ -26,6 +26,18 @@ This corpus is the **`ario.agent/v1` profile vectors** (signed-envelope + RFC-91
 | `README.md` | `7d21d23fcbf9996e9e7a710099bb59b4cb501720ded57aac65edde43de10ef44` |
 
 One envelope vector per `ario.agent/v1` event type (six), plus Merkle trees at leaf counts 0, 1, 2, 3, 7, 16, and 1024 (each with inclusion proofs).
+
+## Contents added at v1.1
+
+> **Corpus tag: `test-vectors-v1.1`** — additive over v1.0. The **`ario.events/v1` profile vectors** (the Anchoring SDK's profile, `@ar.io/anchor` / sibling repo `ar-io-anchor`; registered *proposed* in [`specs/envelope-spec.md`](../specs/envelope-spec.md) §4 at v1.2), homed in the `ario.events-v1/` subdirectory. This profile is **Minimal disclosure + external commitment**: the committed payload is a caller-retained `event_record` whose canonical bytes stay off-chain, so the on-wire envelope carries only its `payload_hash` and a `payload_ref` locator. Because the profile is `proposed` and not in any accept-set, conformant kernels gate these vectors at the **primitive level** (JCS canonical bytes + SHA-256 payload hash + Ed25519 + RFC 9162 Merkle), never through the full profile accept-gate.
+
+| File | SHA-256 |
+|---|---|
+| `ario.events-v1/events-event-01.json` | `ac4f81cf4be28da92ac49fe2461084598dde876a28d252bf997005f34b8903e4` |
+| `ario.events-v1/events-event-02.json` | `d1ab4b6f3cb6ab1f5f33e345a2c6f80c99bedbf10c9ec482ff8a45279e49fb27` |
+| `ario.events-v1/events-checkpoint-01.json` | `ae133294320974611c3952befa7f09ac58e6236027bd59cc82f5ab4f01d4bc12` |
+
+Two unchained event vectors (`environment` dev + production; one exercising unicode/`payload_ref`) plus one Merkle checkpoint (three signed leaf envelopes, RFC 9162 leaf hashes over the complete leaf-envelope JCS bytes, root + per-leaf inclusion proofs). Gated byte-for-byte by both kernels in this repo (`tests/test_conformance.py`, `ts/test/conformance.test.ts`).
 
 ## Verifying a vendored copy
 
