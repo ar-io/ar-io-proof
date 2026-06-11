@@ -22,3 +22,24 @@ jobs:
         run: black --check src tests
       - name: Conformance + unit tests
         run: pytest -q
+
+  ts:
+    # The TypeScript kernel (ts/) — same conformance gate as the Python kernel,
+    # against the one authoritative test-vectors/ corpus. SHA-pinned actions
+    # per this repo's supply-chain discipline.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ts
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - run: npm ci
+      - name: Build (dist ESM + declarations — the publishable shape)
+        run: npm run build
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Conformance + verifier tests (vectors byte-for-byte)
+        run: npm test
