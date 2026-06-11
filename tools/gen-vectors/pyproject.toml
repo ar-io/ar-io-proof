@@ -1,0 +1,9 @@
+[project]
+name = "ario-agent-gen-vectors"
+version = "0.0.1"
+description = "Cross-language test vector generator for ar-io-agent"
+requires-python = ">=3.10"
+dependencies = [
+    "jcs>=0.2.1",
+    "pynacl>=1.5.0",
+]
