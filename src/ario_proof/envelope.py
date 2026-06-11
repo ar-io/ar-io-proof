@@ -47,8 +47,12 @@ __all__ = [
 ]
 
 # The accepted-spec_version registry (architecture.md §3 primitive 5): the
-# single list of recognized profiles. Fail-closed on anything else — a future
-# major is added here deliberately, never inferred.
+# single list of recognized profile MAJORS. Fail-closed on anything else — a
+# future major is added here deliberately, never inferred. Matching is on
+# the v<major> token boundary per envelope-spec v1.1 §2 (grammar
+# ``<namespace>/v<major>[.<minor>]``): a v1 verifier accepts additive
+# minors (``ario.agent/v1.3``) but never a different major
+# (``ario.agent/v10``) or a non-numeric minor (malformed).
 ACCEPTED_SPEC_VERSIONS = frozenset({"ario.agent/v1", "ario.mlflow/v1"})
 
 # Fields excluded from the signed scope. ``signature`` is appended after
@@ -86,9 +90,25 @@ class VerificationResult:
         return asdict(self)
 
 
+def _matches_major(spec_version: str, major: str) -> bool:
+    """True iff ``spec_version`` is ``major`` exactly or ``major`` plus a
+    numeric ``.<minor>`` token (envelope-spec v1.1 §2). Mirrors the Go
+    reference's prefix-on-token-boundary semantics; a non-numeric or empty
+    minor is malformed and rejected (fail-closed)."""
+    if spec_version == major:
+        return True
+    prefix = major + "."
+    if not spec_version.startswith(prefix):
+        return False
+    minor = spec_version[len(prefix) :]
+    return bool(minor) and all(c in "0123456789" for c in minor)
+
+
 def spec_version_supported(spec_version: Any) -> bool:
-    """True iff ``spec_version`` is in the accepted registry."""
-    return spec_version in ACCEPTED_SPEC_VERSIONS
+    """True iff ``spec_version``'s major token is in the accepted registry."""
+    if not isinstance(spec_version, str):
+        return False
+    return any(_matches_major(spec_version, major) for major in ACCEPTED_SPEC_VERSIONS)
 
 
 def envelope_for_signature(envelope: dict[str, Any]) -> dict[str, Any]:
@@ -101,7 +121,9 @@ def envelope_for_signature(envelope: dict[str, Any]) -> dict[str, Any]:
     any) stay inside the signed scope, matching the Go reference.
     """
     spec_version = envelope.get("spec_version")
-    strip_annotations = spec_version is None or spec_version == "ario.mlflow/v1"
+    strip_annotations = spec_version is None or (
+        isinstance(spec_version, str) and _matches_major(spec_version, "ario.mlflow/v1")
+    )
     return {
         k: v
         for k, v in envelope.items()

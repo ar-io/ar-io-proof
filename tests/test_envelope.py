@@ -205,6 +205,60 @@ def test_spec_version_registry() -> None:
     assert not spec_version_supported(None)
 
 
+def test_spec_version_accepts_additive_minor_within_major() -> None:
+    # envelope-spec v1.1 §2: matching is on the v<major> token boundary, so
+    # a v1 verifier accepts additive minors (issue #1; mirrors Go pkg/proof
+    # and TS @ar-io/proof).
+    assert spec_version_supported("ario.agent/v1.3")
+    assert spec_version_supported("ario.mlflow/v1.12")
+
+
+def test_spec_version_rejects_different_major_sharing_digit_prefix() -> None:
+    # "ario.agent/v10" starts with "ario.agent/v1" as a string but is major
+    # 10 — the token boundary (the dot) is what separates these.
+    assert not spec_version_supported("ario.agent/v10")
+    assert not spec_version_supported("ario.mlflow/v11.2")
+
+
+def test_spec_version_rejects_malformed_minor() -> None:
+    # Grammar is <namespace>/v<major>[.<minor>] with numeric minor —
+    # anything else is malformed and fails closed.
+    assert not spec_version_supported("ario.agent/v1.x")
+    assert not spec_version_supported("ario.agent/v1.")
+    assert not spec_version_supported("ario.agent/v1.3.2")
+    assert not spec_version_supported("ario.agent/v1.3x")
+
+
+def test_minor_suffixed_envelope_verifies_end_to_end() -> None:
+    pre = {
+        "spec_version": "ario.agent/v1.3",
+        "event_id": "550e8400-e29b-41d4-a716-446655440005",
+        "event_type": "asset_registered",
+        "subject": {"type": "agent", "tenant_id": "t", "agent_id": "a"},
+        "payload": {"asset": {"asset_id": "x"}, "hash": "ab" * 32},
+        "previous_hash": "GENESIS",
+        "signed_at": "2026-06-11T00:00:00.000Z",
+    }
+    result = verify_envelope(sign_envelope(pre, KEY))
+    assert result.ok
+    assert result.spec_version_ok
+
+
+def test_minor_suffixed_mlflow_keeps_annotation_strip() -> None:
+    # The profile-conditional _* strip is also major-token-based: an
+    # ario.mlflow/v1.2 envelope is still the mlflow profile.
+    pre = {
+        "spec_version": "ario.mlflow/v1.2",
+        "event_id": "550e8400-e29b-41d4-a716-446655440006",
+        "payload_hash": sha256_hex(b"bytes"),
+        "previous_hash": "GENESIS",
+    }
+    env = sign_envelope(pre, KEY)
+    env["_tx_id"] = "annotation"
+    assert "_tx_id" not in envelope_for_signature(env)
+    assert verify_envelope(env).ok
+
+
 def test_unknown_spec_version_fails_closed() -> None:
     env = agent_envelope()
     env["spec_version"] = "ario.agent/v2"

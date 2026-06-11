@@ -85,8 +85,10 @@ envelope = sign_envelope(
 - The **RFC 9162** binary Merkle tree (leaf/node domain separation, audit paths, pinned
   empty-tree root) and the **`ario.agent.proof/v1`** inclusion-proof bundle behind agent
   verification checkpoints.
-- The **accepted-version registry**: `{ario.agent/v1, ario.mlflow/v1}`, fail-closed on
-  anything else. Envelopes that predate `spec_version` verify only with an explicit
+- The **accepted-version registry**: `{ario.agent/v1, ario.mlflow/v1}`, matched on the
+  `v<major>` token boundary per envelope-spec §2 — additive minors (`ario.agent/v1.3`)
+  are accepted within a major; different majors (`ario.agent/v10`) and malformed minors
+  fail closed. Envelopes that predate `spec_version` verify only with an explicit
   `allow_legacy=True`.
 - The signed scope per the ratified contract: the envelope minus `signature`, minus the
   reserved `co_signatures` field (envelope-spec §7.1), and — for `ario.mlflow/v1` and
