@@ -11,8 +11,8 @@
 // envelope. Chain walking (previous_hash), checkpoint reconciliation, and
 // gateway/transport concerns are consumer-layer logic composed above it.
 
-export { contentHashes, jcs, specVersionSupported, verifyEnvelope } from "./verifier";
-export { bytesToHex, ed25519Verify, hexToBytes, sha256Bytes, sha256Hex, utf8 } from "./crypto";
+export { contentHashes, jcs, specVersionSupported, verifyEnvelope } from "./verifier.js";
+export { bytesToHex, ed25519Verify, hexToBytes, sha256Bytes, sha256Hex, utf8 } from "./crypto.js";
 export {
   EMPTY_TREE_ROOT_HEX,
   auditPath,
@@ -20,5 +20,5 @@ export {
   merkleRoot,
   nodeHash,
   verifyInclusion,
-} from "./merkle";
-export type { ContentRole, Envelope, Subject, VerificationResult } from "./types";
+} from "./merkle.js";
+export type { ContentRole, Envelope, Subject, VerificationResult } from "./types.js";

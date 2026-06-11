@@ -12,7 +12,7 @@
 // Conformance is byte-for-byte against the 7 merkle-tree-* vectors of
 // test-vectors-v1.0 (test/conformance.test.ts).
 
-import { sha256Bytes } from "./crypto";
+import { sha256Bytes } from "./crypto.js";
 
 export const EMPTY_TREE_ROOT_HEX =
   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";

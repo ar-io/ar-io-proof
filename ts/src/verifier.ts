@@ -9,8 +9,8 @@
 
 import canonicalize from "canonicalize";
 
-import { ed25519Verify, sha256Hex, utf8 } from "./crypto";
-import type { ContentRole, Envelope, VerificationResult } from "./types";
+import { ed25519Verify, sha256Hex, utf8 } from "./crypto.js";
+import type { ContentRole, Envelope, VerificationResult } from "./types.js";
 
 // Fail-closed accepted-profile registry (envelope-spec §2, artifact.md §13):
 // exactly the accepted profile majors, nothing else. Minors within an accepted
