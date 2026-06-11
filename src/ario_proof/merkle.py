@@ -84,7 +84,11 @@ def verify_inclusion(
     ``leaf`` is the leaf hash (:func:`leaf_hash` of the canonical leaf
     bytes); ``path`` is the audit path bottom-up; ``expected_root`` is the
     ``merkle_root`` committed by the checkpoint envelope. True iff the path
-    reconstructs the expected root. Never raises.
+    reconstructs the expected root. Never raises on adversarial proof
+    *content* (wrong index, truncated/padded path, mismatched root); passing
+    non-``bytes`` arguments is API misuse and raises ``TypeError`` —
+    :func:`ario_proof.bundle.verify_proof_bundle` performs that hex/type
+    validation before calling here.
     """
     if leaf_index < 0 or leaf_index >= total_leaves or total_leaves == 0:
         return False
