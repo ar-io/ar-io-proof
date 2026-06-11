@@ -129,7 +129,9 @@ def _gate_events_envelope(v: dict) -> None:
     assert sign(message, key).hex() == out["signature_hex"]
     assert verify_signature(message, out["signature_hex"], kp["ed25519_public_hex"])
     # Tamper + forgery must both fail.
-    assert not verify_signature(message + b" ", out["signature_hex"], kp["ed25519_public_hex"])
+    assert not verify_signature(
+        message + b" ", out["signature_hex"], kp["ed25519_public_hex"]
+    )
     forged = bytearray(bytes.fromhex(out["signature_hex"]))
     forged[0] ^= 0xFF
     assert not verify_signature(message, bytes(forged).hex(), kp["ed25519_public_hex"])
@@ -165,7 +167,10 @@ def test_events_checkpoint_vector(path: Path) -> None:
         assert verify_inclusion(hashes[i], i, len(hashes), audit, root)
         # A wrong leaf index must not verify against the pinned path.
         wrong = (i + 1) % len(hashes)
-        assert not verify_inclusion(hashes[wrong], i, len(hashes), audit, root) or wrong == i
+        assert (
+            not verify_inclusion(hashes[wrong], i, len(hashes), audit, root)
+            or wrong == i
+        )
 
 
 @pytest.mark.parametrize("path", ENVELOPE_VECTOR_FILES, ids=lambda p: p.stem)
