@@ -4,12 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`ar-io-proof` (import: `ario_proof`) — the standalone Python verification kernel of the ar.io
-verification stack, extracted from `ar-io-mlflow`'s proof engine. It implements exactly the five
-kernel primitives from `ar-io-agent/docs/stack/architecture.md` §3: RFC 8785 (JCS)
-canonicalization, SHA-256, Ed25519 sign/verify, RFC 9162 binary Merkle (incl. inclusion-proof
-bundles), and the accepted-`spec_version` registry. **No I/O, no networking, no key lifecycle** —
-those belong to producers (`ar-io-agent`, `ar-io-mlflow`), not the kernel.
+`ar-io-proof` — the **polyglot verification home** of the ar.io verification stack: the family
+specs (`specs/`), the one authoritative conformance corpus (`test-vectors/`), and two conformant
+kernels that reproduce it byte-for-byte:
+
+- **Python** (`ario_proof`, repo root) — extracted from `ar-io-mlflow`'s proof engine; this is the
+  kernel most of this CLAUDE.md is about.
+- **TypeScript** (`@ar.io/proof`, [`ts/`](ts/)) — moved here 2026-06-11 from the proof-checker app
+  (an app never owns a kernel — same principle that extracted the Python kernel from mlflow).
+
+Both implement exactly the five kernel primitives from
+`ar-io-agent/docs/stack/architecture.md` §3: RFC 8785 (JCS) canonicalization, SHA-256, Ed25519
+sign/verify, RFC 9162 binary Merkle (incl. inclusion-proof bundles), and the
+accepted-`spec_version` registry. **No I/O, no networking, no key lifecycle** — those belong to
+producers (`ar-io-agent`, `ar-io-mlflow`), not the kernel. The Go reference stays MIT-carved in
+`ar-io-agent/pkg/proof`.
+
+### Working in the TS kernel (`ts/`)
+
+Standalone npm package, separate from the Python tooling:
+
+```bash
+cd ts && npm ci
+npm run build        # tsc -p tsconfig.build.json → dist/ (ESM + .d.ts; the published shape)
+npm run typecheck    # tsc --noEmit
+npm test             # vitest — conformance vs ../test-vectors (the same corpus), byte-for-byte
+```
+
+CI runs a dedicated `ts` job (`ci.yml`). Releases go through `release-ts.yml` (npm OIDC trusted
+publishing, provenance on, tags `ts-v*` — distinct from Python's `v*` / `release.yml`). Source
+relative imports MUST carry explicit `.js` extensions (Node-ESM requirement; `moduleResolution:
+bundler` won't add them — this bit `0.1.1`, fixed in `0.1.2`). Kernel changes are spec-layer
+changes: byte-for-byte conformance is the gate, and the Python and Go kernels must stay in
+lockstep (escalate divergences per `specs/governance.md` §6).
 
 ## Commands
 
