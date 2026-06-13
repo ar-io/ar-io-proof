@@ -110,7 +110,7 @@ describe("external commitment", () => {
 describe("mode confusion is closed by the signed scope", () => {
   it("fake-external: stripping an inline payload breaks the signature", async () => {
     const env = await signedEnvelope({ ...minimalFields(), payload: RECORD }, RECORD);
-    const { payload: _stripped, ...rest } = env as Record<string, unknown>;
+    const { payload: _stripped, ...rest } = env as unknown as Record<string, unknown>;
     const r = await verifyEnvelope(rest as unknown as Envelope);
     expect(r.signatureOk).toBe(false); // payload was inside the signed scope
     expect(r.ok).toBe(false);
