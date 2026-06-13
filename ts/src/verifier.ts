@@ -10,7 +10,7 @@
 import canonicalize from "canonicalize";
 
 import { ed25519Verify, sha256Hex, utf8 } from "./crypto.js";
-import type { ContentRole, Envelope, VerificationResult } from "./types.js";
+import type { ContentRole, Envelope, VerificationResult, VerifyOptions } from "./types.js";
 
 // Fail-closed accepted-profile registry (envelope-spec §2, artifact.md §13):
 // exactly the accepted profile majors, nothing else. Minors within an accepted
@@ -23,7 +23,15 @@ const ACCEPTED_SPEC_MAJORS = ["ario.agent/v1"];
 
 // RFC 8785 (JCS) canonicalization. The `canonicalize` package is the reference
 // JS implementation; correctness is pinned by the conformance vectors.
+//
+// Lone (unpaired) UTF-16 surrogates are REJECTED, never passed through: RFC
+// 8785 requires well-formed UTF-8 output, JS strings can carry lone
+// surrogates that `canonicalize` would emit as-is, and the sibling kernels
+// cannot represent them (Python raises on encode; Go's JSON decoder replaces
+// them). Reject-only is the one behavior all three kernels can share —
+// pinned here and by the corpus lone-surrogate negative.
 export function jcs(value: unknown): string {
+  rejectLoneSurrogates(value);
   const canonical = canonicalize(value);
   if (typeof canonical !== "string") {
     throw new Error("jcs: canonicalize returned a non-string (input not JSON-serializable?)");
@@ -31,9 +39,58 @@ export function jcs(value: unknown): string {
   return canonical;
 }
 
+// Walk every string in the value (keys and values). The check must run on
+// the INPUT: `canonicalize` escapes a lone surrogate as `\udXXX` text in its
+// output, so the malformed code unit is invisible after serialization.
+function rejectLoneSurrogates(value: unknown): void {
+  if (typeof value === "string") {
+    if (hasLoneSurrogate(value)) {
+      throw new Error(
+        "jcs: input contains a lone UTF-16 surrogate (not representable as UTF-8)",
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) rejectLoneSurrogates(v);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      rejectLoneSurrogates(k);
+      rejectLoneSurrogates(v);
+    }
+  }
+}
+
+function hasLoneSurrogate(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const next = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        i++; // valid pair
+        continue;
+      }
+      return true; // high surrogate without a low
+    }
+    if (c >= 0xdc00 && c <= 0xdfff) return true; // low surrogate without a high
+  }
+  return false;
+}
+
+// Grammar-strict accept check (envelope-spec §2): `<major>` exactly, or
+// `<major>.<minor>` where minor is `[0-9]+`. A non-numeric minor suffix is
+// malformed, not a tolerated future version — matching the Python kernel's
+// 0.1.1 semantics (ar-io-agent#13 closed the TS/Go fail-open lenience).
 export function specVersionSupported(specVersion: string): boolean {
   if (typeof specVersion !== "string" || specVersion === "") return false;
-  return ACCEPTED_SPEC_MAJORS.some((m) => specVersion === m || specVersion.startsWith(`${m}.`));
+  return ACCEPTED_SPEC_MAJORS.some((m) => {
+    if (specVersion === m) return true;
+    if (!specVersion.startsWith(`${m}.`)) return false;
+    const minor = specVersion.slice(m.length + 1);
+    return minor.length > 0 && /^[0-9]+$/.test(minor);
+  });
 }
 
 // The content hash(es) an envelope commits to, by event type — the values a
@@ -44,7 +101,9 @@ export function specVersionSupported(specVersion: string): boolean {
 //                    -> payload.baseline.hash   (the known-good bytes it diverged from)
 // Other event types commit to no asset content hash.
 export function contentHashes(env: Envelope): { role: ContentRole; hash: string }[] {
-  const p = env.payload as {
+  // Minimal-disclosure / external-commitment envelopes have no inline payload
+  // (and no event_type) — they commit to no envelope-readable content hash.
+  const p = (env.payload ?? {}) as {
     hash?: unknown;
     baseline?: { hash?: unknown };
     observed?: { hash?: unknown };
@@ -74,15 +133,34 @@ export function contentHashes(env: Envelope): { role: ContentRole; hash: string 
   return out;
 }
 
-// Verify an envelope. The three load-bearing checks (spec_version, payload_hash,
-// signature) establish that the envelope is authentic. When `expectedContentHash`
-// is supplied (the in-browser hash of the user's file), an additional bind check
-// confirms the bytes the user holds are the bytes this envelope is about — this
-// is the step that makes a lying gateway tag worthless.
+// Verify an envelope — both binding modes (envelope-spec §3), one rule,
+// mirroring the Python reference kernel exactly:
+//
+//   - envelope carries `payload`        → inline check: recompute
+//     SHA-256(JCS(payload)) and compare to payload_hash
+//   - caller supplies `payloadBytes`    → external check:
+//     SHA-256(payloadBytes) must equal payload_hash
+//   - both available                    → both must pass
+//   - neither                           → payloadHashOk = null and the
+//     verdict does NOT fail: "signature-valid, semantics-undetermined"
+//     (§3.1/§6.2). The signature alone still proves who signed what bytes.
+//
+// Binding-mode detection is structural, not registry-driven: mode confusion
+// is closed by the signed scope itself (an inline payload is INSIDE the
+// signature, so stripping it to fake "external" — or injecting one to fake
+// "inline" — breaks the signature).
+//
+// The second argument accepts the legacy `expectedContentHash` string form
+// or a VerifyOptions object ({ payloadBytes, expectedContentHash }).
 export async function verifyEnvelope(
   env: Envelope,
-  expectedContentHash?: string,
+  optionsOrContentHash?: string | VerifyOptions,
 ): Promise<VerificationResult> {
+  const opts: VerifyOptions =
+    typeof optionsOrContentHash === "string"
+      ? { expectedContentHash: optionsOrContentHash }
+      : (optionsOrContentHash ?? {});
+  const expectedContentHash = opts.expectedContentHash;
   const errors: string[] = [];
 
   // Guard a malformed input (null / non-object / array) up front — every field
@@ -103,17 +181,39 @@ export async function verifyEnvelope(
   const specVersionOk = specVersionSupported(env.spec_version);
   if (!specVersionOk) errors.push(`unsupported spec_version: ${JSON.stringify(env.spec_version)}`);
 
-  // Check 1 — Record Matches: payload_hash == SHA-256(JCS(payload)).
-  let payloadHashOk = false;
-  try {
-    const recomputed = await sha256Hex(utf8(jcs(env.payload)));
-    payloadHashOk = recomputed === env.payload_hash;
-    if (!payloadHashOk) {
-      errors.push(`payload_hash mismatch: envelope=${env.payload_hash} recomputed=${recomputed}`);
+  // Check 1 — Payload binding (both modes; see header). Compare ONLY when
+  // there is material to compare against, exactly like the Python reference:
+  // a missing/malformed payload_hash with nothing to compare is left
+  // undetermined (null), not failed — the signature still covers whatever
+  // payload_hash is or isn't present. (envelope-spec §2 says a conformant
+  // PRODUCER must emit payload_hash; the kernel-tighten of verifier-side
+  // absence is a separate all-kernels question, escalated, not fixed
+  // asymmetrically here.)
+  const checks: boolean[] = [];
+  if ("payload" in env && env.payload !== undefined) {
+    try {
+      const recomputed = await sha256Hex(utf8(jcs(env.payload)));
+      checks.push(recomputed === env.payload_hash);
+      if (recomputed !== env.payload_hash) {
+        errors.push(
+          `payload_hash mismatch: envelope=${env.payload_hash} recomputed=${recomputed}`,
+        );
+      }
+    } catch (e) {
+      checks.push(false);
+      errors.push(`payload canonicalization failed: ${stringifyErr(e)}`);
     }
-  } catch (e) {
-    errors.push(`payload canonicalization failed: ${stringifyErr(e)}`);
   }
+  if (opts.payloadBytes !== undefined) {
+    const external = await sha256Hex(opts.payloadBytes);
+    checks.push(external === env.payload_hash);
+    if (external !== env.payload_hash) {
+      errors.push(
+        `payload_hash does not match the committed bytes: envelope=${env.payload_hash} bytes=${external}`,
+      );
+    }
+  }
+  const payloadHashOk: boolean | null = checks.length > 0 ? checks.every(Boolean) : null;
 
   // Check 2 — Signature Confirmed: Ed25519 over the signed scope, which is
   // JCS(envelope minus `signature` minus `co_signatures`) per envelope-spec §2.
@@ -145,7 +245,9 @@ export async function verifyEnvelope(
   }
 
   return {
-    ok: specVersionOk && payloadHashOk && signatureOk,
+    // null (binding not checkable) does not fail the verdict — Python-kernel
+    // parity: ok = spec && sig && payloadHashOk is not False.
+    ok: specVersionOk && signatureOk && payloadHashOk !== false,
     specVersionOk,
     payloadHashOk,
     signatureOk,
