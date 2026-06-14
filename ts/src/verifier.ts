@@ -145,6 +145,10 @@ export function contentHashes(env: Envelope): { role: ContentRole; hash: string 
 //     verdict does NOT fail: "signature-valid, semantics-undetermined"
 //     (§3.1/§6.2). The signature alone still proves who signed what bytes.
 //
+// payload_hash itself MUST be present (a string) in every mode — its
+// absence is rejected per envelope-spec §2, independent of whether there is
+// material to compare it against.
+//
 // Binding-mode detection is structural, not registry-driven: mode confusion
 // is closed by the signed scope itself (an inline payload is INSIDE the
 // signature, so stripping it to fake "external" — or injecting one to fake
@@ -181,39 +185,49 @@ export async function verifyEnvelope(
   const specVersionOk = specVersionSupported(env.spec_version);
   if (!specVersionOk) errors.push(`unsupported spec_version: ${JSON.stringify(env.spec_version)}`);
 
-  // Check 1 — Payload binding (both modes; see header). Compare ONLY when
-  // there is material to compare against, exactly like the Python reference:
-  // a missing/malformed payload_hash with nothing to compare is left
-  // undetermined (null), not failed — the signature still covers whatever
-  // payload_hash is or isn't present. (envelope-spec §2 says a conformant
-  // PRODUCER must emit payload_hash; the kernel-tighten of verifier-side
-  // absence is a separate all-kernels question, escalated, not fixed
-  // asymmetrically here.)
-  const checks: boolean[] = [];
-  if ("payload" in env && env.payload !== undefined) {
-    try {
-      const recomputed = await sha256Hex(utf8(jcs(env.payload)));
-      checks.push(recomputed === env.payload_hash);
-      if (recomputed !== env.payload_hash) {
+  // Check 1 — Payload binding (both modes; see header).
+  //
+  // payload_hash MUST be present and a string in every mode — envelope-spec
+  // §2: "a verifier cannot proceed without spec_version / public_key /
+  // signature / payload_hash and MUST reject their absence." All three
+  // kernels enforce this (the Python reference's prior compare-only-if-present
+  // lenience was the bug; §2 is binding).
+  //
+  // When present, it is COMPARED only against material that exists — an
+  // inline payload, supplied committed bytes, or both. With neither, the
+  // binding is undetermined (null): "signature-valid, semantics-undetermined"
+  // (§3.1/§6.2). null does not fail the verdict; absence does.
+  let payloadHashOk: boolean | null;
+  if (typeof env.payload_hash !== "string") {
+    payloadHashOk = false;
+    errors.push("missing payload_hash (envelope-spec §2: required in every profile)");
+  } else {
+    const checks: boolean[] = [];
+    if ("payload" in env && env.payload !== undefined) {
+      try {
+        const recomputed = await sha256Hex(utf8(jcs(env.payload)));
+        checks.push(recomputed === env.payload_hash);
+        if (recomputed !== env.payload_hash) {
+          errors.push(
+            `payload_hash mismatch: envelope=${env.payload_hash} recomputed=${recomputed}`,
+          );
+        }
+      } catch (e) {
+        checks.push(false);
+        errors.push(`payload canonicalization failed: ${stringifyErr(e)}`);
+      }
+    }
+    if (opts.payloadBytes !== undefined) {
+      const external = await sha256Hex(opts.payloadBytes);
+      checks.push(external === env.payload_hash);
+      if (external !== env.payload_hash) {
         errors.push(
-          `payload_hash mismatch: envelope=${env.payload_hash} recomputed=${recomputed}`,
+          `payload_hash does not match the committed bytes: envelope=${env.payload_hash} bytes=${external}`,
         );
       }
-    } catch (e) {
-      checks.push(false);
-      errors.push(`payload canonicalization failed: ${stringifyErr(e)}`);
     }
+    payloadHashOk = checks.length > 0 ? checks.every(Boolean) : null;
   }
-  if (opts.payloadBytes !== undefined) {
-    const external = await sha256Hex(opts.payloadBytes);
-    checks.push(external === env.payload_hash);
-    if (external !== env.payload_hash) {
-      errors.push(
-        `payload_hash does not match the committed bytes: envelope=${env.payload_hash} bytes=${external}`,
-      );
-    }
-  }
-  const payloadHashOk: boolean | null = checks.length > 0 ? checks.every(Boolean) : null;
 
   // Check 2 — Signature Confirmed: Ed25519 over the signed scope, which is
   // JCS(envelope minus `signature` minus `co_signatures`) per envelope-spec §2.

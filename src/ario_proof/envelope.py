@@ -171,10 +171,13 @@ def verify_envelope(
        (fail-closed). ``allow_legacy=True`` additionally accepts envelopes
        with no ``spec_version`` field (mlflow envelopes anchored before the
        field existed); these are flagged ``legacy_envelope=True``.
-    2. **payload binding** — inline mode when the envelope carries
+    2. **payload binding** — ``payload_hash`` MUST be present (envelope-spec
+       §2; its absence fails). Inline mode when the envelope carries
        ``payload`` (recompute ``SHA-256(JCS(payload))``); external mode when
        the caller supplies ``payload_bytes``. Both are checked when both are
-       available; ``payload_hash_ok`` is ``None`` when neither is.
+       available; ``payload_hash_ok`` is ``None`` (undetermined) when
+       ``payload_hash`` is present but there is no material to compare it
+       against.
     3. **signature** — Ed25519 over ``JCS(envelope_for_signature(envelope))``
        under the envelope's own ``public_key``. (This proves the holder of
        that key signed it; trusting *whose* key it is comes from out of
@@ -211,22 +214,34 @@ def verify_envelope(
             errors.append(f"unsupported spec_version: {spec_version!r}")
 
     # -- 2. payload binding ---------------------------------------------
+    # payload_hash MUST be present (a string) in every mode — envelope-spec
+    # §2: a verifier "cannot proceed without ... payload_hash and MUST reject
+    # their absence." Its absence is a hard fail, independent of whether there
+    # is material to compare it against. When present, it is compared only
+    # against material that exists (inline payload, supplied bytes, or both);
+    # with neither, the binding is undetermined (None) — "signature-valid,
+    # semantics-undetermined" (§3.1/§6.2), which does not fail the verdict.
     stored_hash = envelope.get("payload_hash")
-    checks: list[bool] = []
-    if "payload" in envelope:
-        try:
-            computed = sha256_hex(canonical_json(envelope["payload"]))
-            checks.append(computed == stored_hash)
-        except Exception:
-            checks.append(False)
-            errors.append("payload is not JCS-canonicalizable")
-    if payload_bytes is not None:
-        checks.append(sha256_hex(payload_bytes) == stored_hash)
-    payload_hash_ok: bool | None = all(checks) if checks else None
-    if payload_hash_ok is False and not any(
-        e.startswith("payload is not") for e in errors
-    ):
-        errors.append("payload_hash does not match the committed bytes")
+    payload_hash_ok: bool | None
+    if not isinstance(stored_hash, str):
+        payload_hash_ok = False
+        errors.append("missing payload_hash (envelope-spec §2: required in every profile)")
+    else:
+        checks: list[bool] = []
+        if "payload" in envelope:
+            try:
+                computed = sha256_hex(canonical_json(envelope["payload"]))
+                checks.append(computed == stored_hash)
+            except Exception:
+                checks.append(False)
+                errors.append("payload is not JCS-canonicalizable")
+        if payload_bytes is not None:
+            checks.append(sha256_hex(payload_bytes) == stored_hash)
+        payload_hash_ok = all(checks) if checks else None
+        if payload_hash_ok is False and not any(
+            e.startswith("payload is not") for e in errors
+        ):
+            errors.append("payload_hash does not match the committed bytes")
 
     # -- 3. signature ----------------------------------------------------
     signature_ok = False

@@ -69,15 +69,16 @@ describe("external commitment", () => {
     expect(r.signatureOk).toBe(true); // the signature itself is still good
   });
 
-  it("payload_hash is only checked when there is material to compare (Python parity)", async () => {
-    // No payload_hash and nothing to compare → undetermined, NOT failed.
-    // Matches the Python reference: checks=[] → None → ok = spec && sig.
+  it("rejects a missing payload_hash field outright (envelope-spec §2)", async () => {
+    // §2 is binding: absence of payload_hash is a hard reject in every mode,
+    // regardless of whether there is material to compare it against.
     const noHash = await signedEnvelope(minimalFields());
     const r1 = await verifyEnvelope(noHash);
-    expect(r1.payloadHashOk).toBe(null);
-    expect(r1.ok).toBe(true);
+    expect(r1.payloadHashOk).toBe(false);
+    expect(r1.ok).toBe(false);
+    expect(r1.signatureOk).toBe(true); // the signature itself is fine
 
-    // A malformed payload_hash that IS compared against material fails.
+    // Present but compared against the wrong material still fails the bind.
     const badHash = await signedEnvelope({ ...minimalFields(), payload_hash: "ZZ" });
     const r2 = await verifyEnvelope(badHash, { payloadBytes: utf8("anything") });
     expect(r2.payloadHashOk).toBe(false);
