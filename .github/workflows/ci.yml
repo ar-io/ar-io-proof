@@ -43,3 +43,39 @@ jobs:
         run: npm run typecheck
       - name: Conformance + verifier tests (vectors byte-for-byte)
         run: npm test
+
+  cross-kernel:
+    # Python ⇄ TS ⇄ Go agreement gate over the corpus + adversarial cases
+    # (cross-kernel/). The three kernels must return identical verdicts on
+    # identical bytes. Python+TS always run; the Go leg builds ar-io-agent
+    # pkg/proof at cross-kernel/PIN when the agent source is fetchable, and
+    # SKIPS loudly otherwise (public PRs without private-repo access).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.25.0"
+      - name: Install Python kernel + node deps
+        run: |
+          pip install -e .[dev]
+          (cd ts && npm ci)
+      - name: Materialize ar-io-agent at PIN (Go leg, best-effort)
+        env:
+          AGENT_REPO_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
+        run: |
+          pin="$(grep '^agent_commit=' cross-kernel/PIN | cut -d= -f2)"
+          if [ -n "$AGENT_REPO_TOKEN" ]; then
+            git clone --no-checkout "https://x-access-token:${AGENT_REPO_TOKEN}@github.com/ar-io/ar-io-agent.git" ../ar-io-agent
+            git -C ../ar-io-agent fetch origin "$pin" || true
+          else
+            echo "AGENT_REPO_TOKEN unset — Go leg will SKIP (Python+TS still gate)"
+          fi
+      - name: Cross-kernel agreement (Python + TS + Go)
+        run: AGENT_SRC="$PWD/../ar-io-agent" bash cross-kernel/run.sh
