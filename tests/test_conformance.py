@@ -60,7 +60,23 @@ CORPUS_EVENTS_SHA256 = {
     "events-checkpoint-01.json": "ae133294320974611c3952befa7f09ac58e6236027bd59cc82f5ab4f01d4bc12",
 }
 EVENTS_EVENT_FILES = sorted(EVENTS_DIR.glob("events-event-*.json"))
-EVENTS_CHECKPOINT_FILES = sorted(EVENTS_DIR.glob("events-checkpoint-*.json"))
+# The single-window checkpoint vectors gated by _gate_events_envelope; the
+# chained vector (events-checkpoint-chain-*) has its own structure + test.
+EVENTS_CHECKPOINT_FILES = sorted(
+    p for p in EVENTS_DIR.glob("events-checkpoint-*.json") if "-chain-" not in p.name
+)
+
+# test-vectors-v1.2 additive SHAs (kernel-ratification lane, Scope D).
+CORPUS_EVENTS_V12_SHA256 = {
+    "events-checkpoint-chain-01.json": "71a099143d17b6583f12ce132840c1f802951613b7e456d98703bc87625c7f54",
+}
+CORPUS_NEGATIVES_SHA256 = {
+    "negative-malformed-minor-00.json": "31758aa41471bd17521a94c16d44057b7415eb905d1c7852e0086852fd5f39c1",
+    "negative-malformed-minor-01.json": "6d3f22d01c4a0f2dc8979dae2aef3ae9c0821a990fc26eca344ac78b75d7c30f",
+    "negative-malformed-minor-02.json": "b437b44ea6d793bb4b5a0483e046fc08219b5a3b40dc2f2db2c7ead6132b0f3c",
+    "negative-lone-surrogate-00.json": "c89a558c5efc6b0bbf9e82c104dd29d0315bfbefcc56c7ccaea8b81c60e848ed",
+    "negative-missing-payload-hash-00.json": "a2818add7d61e0de56b2782e91b3a69275e3ec07b81f258aff7c65657cb999cb",
+}
 
 
 def load(path: Path) -> dict:
@@ -91,11 +107,31 @@ def test_corpus_complete() -> None:
     assert vector_files == expected
     assert len(ENVELOPE_VECTOR_FILES) == 6
     assert len(MERKLE_VECTOR_FILES) == 7
-    # corpus v1.1 additive set: the ario.events/v1 profile subdirectory.
+    # ario.events/v1 subdirectory: v1.1 set + the v1.2 chained checkpoint.
     event_files = {p.name for p in EVENTS_DIR.glob("*.json")}
-    assert event_files == set(CORPUS_EVENTS_SHA256)
+    assert event_files == set(CORPUS_EVENTS_SHA256) | set(CORPUS_EVENTS_V12_SHA256)
     assert len(EVENTS_EVENT_FILES) == 2
-    assert len(EVENTS_CHECKPOINT_FILES) == 1
+    assert len(EVENTS_CHECKPOINT_FILES) == 1  # single-window only (chain excluded)
+    # v1.2 negatives subdirectory.
+    if NEGATIVES_DIR.is_dir():
+        negative_files = {p.name for p in NEGATIVES_DIR.glob("*.json")}
+        assert negative_files == set(CORPUS_NEGATIVES_SHA256)
+
+
+@pytest.mark.parametrize("name", sorted({**CORPUS_EVENTS_V12_SHA256}), ids=lambda n: n)
+def test_corpus_integrity_events_v12(name: str) -> None:
+    digest = hashlib.sha256((EVENTS_DIR / name).read_bytes()).hexdigest()
+    assert (
+        digest == CORPUS_EVENTS_V12_SHA256[name]
+    ), f"{name} drifted from test-vectors-v1.2"
+
+
+@pytest.mark.parametrize("name", sorted(CORPUS_NEGATIVES_SHA256))
+def test_corpus_integrity_negatives(name: str) -> None:
+    digest = hashlib.sha256((NEGATIVES_DIR / name).read_bytes()).hexdigest()
+    assert (
+        digest == CORPUS_NEGATIVES_SHA256[name]
+    ), f"{name} drifted from test-vectors-v1.2"
 
 
 @pytest.mark.parametrize("name", sorted(CORPUS_EVENTS_SHA256))
@@ -377,3 +413,61 @@ def test_merkle_inclusion_proofs(path: Path) -> None:
             assert not verify_inclusion(
                 hashes[other], other, v["leaf_count"], pinned_path, root
             )
+
+
+# --- test-vectors-v1.2 additive: chained checkpoint + negatives -------------
+
+CHAIN_VECTOR = EVENTS_DIR / "events-checkpoint-chain-01.json"
+NEGATIVES_DIR = VECTORS_DIR / "negatives"
+NEGATIVE_FILES = sorted(NEGATIVES_DIR.glob("*.json")) if NEGATIVES_DIR.is_dir() else []
+
+
+@pytest.mark.skipif(not CHAIN_VECTOR.exists(), reason="v1.2 chain vector not present")
+def test_events_checkpoint_chain() -> None:
+    """Per-batcher continuity: window-2 previous_hash = window-1 record hash,
+    and each checkpoint verifies full-family through verify_envelope."""
+    v = load(CHAIN_VECTOR)
+    w1, w2 = v["windows"]
+    w1_record_hash = sha256_hex(canonical_json(w1["inputs"]["event_record"]))
+    assert w1_record_hash == w1["expected_outputs"]["payload_hash_hex"]
+    # The chain link being pinned.
+    assert w2["inputs"]["event_record"]["previous_hash"] == w1_record_hash
+    assert v["chain_link"]["window2_previous_hash"] == w1_record_hash
+    assert w1["inputs"]["event_record"]["context"]["chain_key"] == v["chain_key"]
+    assert w2["inputs"]["event_record"]["context"]["chain_key"] == v["chain_key"]
+
+    for w in (w1, w2):
+        complete = json.loads(
+            bytes.fromhex(w["expected_outputs"]["envelope_jcs_bytes_hex"])
+        )
+        record_bytes = canonical_json(w["inputs"]["event_record"])
+        bound = verify_envelope(complete, payload_bytes=record_bytes)
+        assert bound.ok and bound.payload_hash_ok is True
+        hashes = [
+            bytes.fromhex(leaf["leaf_hash_hex"]) for leaf in w["merkle"]["leaves"]
+        ]
+        for leaf in w["merkle"]["leaves"]:
+            assert (
+                leaf_hash(bytes.fromhex(leaf["envelope_jcs_bytes_hex"])).hex()
+                == leaf["leaf_hash_hex"]
+            )
+        assert merkle_root(hashes).hex() == w["merkle"]["expected_root_hex"]
+        assert (
+            w["inputs"]["event_record"]["event"]["merkle_root"]
+            == w["merkle"]["expected_root_hex"]
+        )
+
+
+@pytest.mark.parametrize("path", NEGATIVE_FILES, ids=lambda p: p.stem)
+def test_negative_vector_is_rejected(path: Path) -> None:
+    """Every negative vector's bytes MUST fail to verify (parse failure counts
+    as rejection — e.g. the lone-surrogate case)."""
+    n = load(path)
+    assert n["expect"]["accepts"] is False
+    raw = bytes.fromhex(n["envelope_bytes_hex"])
+    try:
+        env = json.loads(raw)
+        rejected = not verify_envelope(env).ok
+    except Exception:
+        rejected = True  # unparseable (lone surrogate) is a valid rejection
+    assert rejected, f"{n['vector_id']} ({n['category']}) was not rejected"

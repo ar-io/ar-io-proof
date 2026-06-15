@@ -235,7 +235,19 @@ const CORPUS_EVENTS_SHA256: Record<string, string> = {
   "events-event-02.json": "d1ab4b6f3cb6ab1f5f33e345a2c6f80c99bedbf10c9ec482ff8a45279e49fb27",
   "events-checkpoint-01.json": "ae133294320974611c3952befa7f09ac58e6236027bd59cc82f5ab4f01d4bc12",
 };
+// test-vectors-v1.2 additive SHAs (kernel-ratification lane, Scope D).
+const CORPUS_EVENTS_V12_SHA256: Record<string, string> = {
+  "events-checkpoint-chain-01.json": "71a099143d17b6583f12ce132840c1f802951613b7e456d98703bc87625c7f54",
+};
+const CORPUS_NEGATIVES_SHA256: Record<string, string> = {
+  "negative-malformed-minor-00.json": "31758aa41471bd17521a94c16d44057b7415eb905d1c7852e0086852fd5f39c1",
+  "negative-malformed-minor-01.json": "6d3f22d01c4a0f2dc8979dae2aef3ae9c0821a990fc26eca344ac78b75d7c30f",
+  "negative-malformed-minor-02.json": "b437b44ea6d793bb4b5a0483e046fc08219b5a3b40dc2f2db2c7ead6132b0f3c",
+  "negative-lone-surrogate-00.json": "c89a558c5efc6b0bbf9e82c104dd29d0315bfbefcc56c7ccaea8b81c60e848ed",
+  "negative-missing-payload-hash-00.json": "a2818add7d61e0de56b2782e91b3a69275e3ec07b81f258aff7c65657cb999cb",
+};
 const eventsDir = fileURLToPath(new URL("../../test-vectors/ario.events-v1/", import.meta.url));
+const negativesDir = fileURLToPath(new URL("../../test-vectors/negatives/", import.meta.url));
 
 interface EventsVector {
   vector_id: string;
@@ -261,7 +273,7 @@ interface EventsVector {
 
 function loadEvents(prefix: string): EventsVector[] {
   return readdirSync(eventsDir)
-    .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
+    .filter((f) => f.startsWith(prefix) && f.endsWith(".json") && !f.includes("-chain-"))
     .sort()
     .map((f) => JSON.parse(readFileSync(`${eventsDir}${f}`, "utf8")) as EventsVector);
 }
@@ -302,16 +314,17 @@ async function gateEventsEnvelope(v: EventsVector): Promise<void> {
   expect((await verifyEnvelope(complete, { payloadBytes: utf8("wrong") })).ok).toBe(false);
 }
 
-describe("corpus integrity (test-vectors-v1.1 — ario.events/v1)", () => {
-  for (const [name, expected] of Object.entries(CORPUS_EVENTS_SHA256)) {
+describe("corpus integrity (ario.events/v1)", () => {
+  const allEvents = { ...CORPUS_EVENTS_SHA256, ...CORPUS_EVENTS_V12_SHA256 };
+  for (const [name, expected] of Object.entries(allEvents)) {
     it(`${name} matches its pinned digest`, () => {
       const digest = createHash("sha256").update(readFileSync(`${eventsDir}${name}`)).digest("hex");
-      expect(digest, `events vector ${name} drifted from test-vectors-v1.1`).toBe(expected);
+      expect(digest, `events vector ${name} drifted from its pinned corpus tag`).toBe(expected);
     });
   }
   it("the events set is complete — no missing or extra files", () => {
     const onDisk = readdirSync(eventsDir).filter((f) => f.endsWith(".json")).sort();
-    expect(onDisk).toEqual(Object.keys(CORPUS_EVENTS_SHA256).sort());
+    expect(onDisk).toEqual(Object.keys(allEvents).sort());
   });
 });
 
@@ -354,6 +367,113 @@ describe("ario.events/v1 checkpoint conformance (RFC 9162 Merkle)", () => {
           }
         }
       });
+    });
+  }
+});
+
+// --- test-vectors-v1.2 additive: chained checkpoint + negatives ------------
+
+interface CheckpointWindow {
+  inputs: { event_record: Record<string, unknown> };
+  expected_outputs: { payload_hash_hex: string; envelope_jcs_bytes_hex: string };
+  merkle: {
+    expected_root_hex: string;
+    leaves: { envelope_jcs_bytes_hex: string; leaf_hash_hex: string }[];
+    inclusion_proofs: { leaf_index: number; audit_path_hex: string[] }[];
+  };
+}
+interface ChainVector {
+  vector_id: string;
+  spec_version: string;
+  chain_key: string;
+  windows: CheckpointWindow[];
+  chain_link: { window1_record_hash: string; window2_previous_hash: string };
+}
+
+describe("ario.events/v1 checkpoint chain (test-vectors-v1.2)", () => {
+  const chainPath = `${eventsDir}events-checkpoint-chain-01.json`;
+  const v = JSON.parse(readFileSync(chainPath, "utf8")) as ChainVector;
+  const [w1, w2] = v.windows;
+
+  it("integrity digest is pinned", () => {
+    const digest = createHash("sha256").update(readFileSync(chainPath)).digest("hex");
+    expect(digest).toBe(CORPUS_EVENTS_V12_SHA256["events-checkpoint-chain-01.json"]);
+  });
+
+  it("window-2 previous_hash equals SHA-256(JCS(window-1 checkpoint record))", async () => {
+    expect(v.spec_version).toBe("ario.events/v1");
+    const w1RecordHash = await sha256Hex(utf8(jcs(w1.inputs.event_record)));
+    expect(w1RecordHash).toBe(w1.expected_outputs.payload_hash_hex);
+    expect((w2.inputs.event_record as { previous_hash: string }).previous_hash).toBe(w1RecordHash);
+    expect(v.chain_link.window2_previous_hash).toBe(w1RecordHash);
+    expect((w1.inputs.event_record.context as { chain_key: string }).chain_key).toBe(v.chain_key);
+    expect((w2.inputs.event_record.context as { chain_key: string }).chain_key).toBe(v.chain_key);
+  });
+
+  for (const [i, w] of v.windows.entries()) {
+    it(`window ${i + 1} verifies full-family + merkle/inclusion`, async () => {
+      const complete = JSON.parse(
+        new TextDecoder().decode(hexToBytes(w.expected_outputs.envelope_jcs_bytes_hex)),
+      ) as Envelope;
+      const recordBytes = utf8(jcs(w.inputs.event_record));
+      const bound = await verifyEnvelope(complete, { payloadBytes: recordBytes });
+      expect(bound.ok).toBe(true);
+      expect(bound.payloadHashOk).toBe(true);
+      expect((await verifyEnvelope(complete)).payloadHashOk).toBe(null); // signature-only
+
+      const hashes: Uint8Array[] = [];
+      for (const leaf of w.merkle.leaves) {
+        const h = await leafHash(hexToBytes(leaf.envelope_jcs_bytes_hex));
+        expect(bytesToHex(h)).toBe(leaf.leaf_hash_hex);
+        hashes.push(h);
+      }
+      expect(bytesToHex(await merkleRoot(hashes))).toBe(w.merkle.expected_root_hex);
+      expect((w.inputs.event_record.event as { merkle_root: string }).merkle_root).toBe(
+        w.merkle.expected_root_hex,
+      );
+      const root = hexToBytes(w.merkle.expected_root_hex);
+      for (const proof of w.merkle.inclusion_proofs) {
+        const idx = proof.leaf_index;
+        const pinned = proof.audit_path_hex.map(hexToBytes);
+        expect(await verifyInclusion(hashes[idx], idx, hashes.length, pinned, root)).toBe(true);
+      }
+    });
+  }
+});
+
+interface NegativeVector {
+  vector_id: string;
+  category: string;
+  envelope_bytes_hex: string;
+  expect: { accepts: boolean; reason: string };
+}
+
+describe("negative vectors must be rejected (test-vectors-v1.2)", () => {
+  const files = readdirSync(negativesDir)
+    .filter((f) => f.endsWith(".json"))
+    .sort();
+
+  it("the negatives set is complete with pinned digests", () => {
+    expect(files).toEqual(Object.keys(CORPUS_NEGATIVES_SHA256).sort());
+    for (const f of files) {
+      const digest = createHash("sha256").update(readFileSync(`${negativesDir}${f}`)).digest("hex");
+      expect(digest, `${f} drifted`).toBe(CORPUS_NEGATIVES_SHA256[f]);
+    }
+  });
+
+  for (const f of files) {
+    const n = JSON.parse(readFileSync(`${negativesDir}${f}`, "utf8")) as NegativeVector;
+    it(`${n.vector_id} (${n.category}) does not verify`, async () => {
+      expect(n.expect.accepts).toBe(false);
+      const raw = hexToBytes(n.envelope_bytes_hex);
+      let rejected = false;
+      try {
+        const env = JSON.parse(new TextDecoder().decode(raw)) as Envelope;
+        rejected = !(await verifyEnvelope(env)).ok;
+      } catch {
+        rejected = true; // unparseable (lone surrogate) is a valid rejection
+      }
+      expect(rejected, `${n.vector_id} was not rejected`).toBe(true);
     });
   }
 });

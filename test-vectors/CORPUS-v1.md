@@ -39,6 +39,21 @@ One envelope vector per `ario.agent/v1` event type (six), plus Merkle trees at l
 
 Two unchained event vectors (`environment` dev + production; one exercising unicode/`payload_ref`) plus one Merkle checkpoint (three signed leaf envelopes, RFC 9162 leaf hashes over the complete leaf-envelope JCS bytes, root + per-leaf inclusion proofs). Gated byte-for-byte by both kernels in this repo (`tests/test_conformance.py`, `ts/test/conformance.test.ts`).
 
+## Contents added at v1.2
+
+> **Corpus tag: `test-vectors-v1.2`** — additive over v1.1 (kernel-ratification lane, Scope D). `ario.events/v1` is now **ratified** (envelope-spec v1.3), so its vectors gate through `verifyEnvelope` in all three kernels. Two new artifacts: a **chained two-checkpoint** vector (per-batcher continuity across windows — window-2's checkpoint record `previous_hash` = SHA-256(JCS(window-1 checkpoint record))), and a **`negatives/`** category — inputs a conformant verifier MUST reject, each carrying the complete envelope bytes + the expected rejection.
+
+| File | SHA-256 |
+|---|---|
+| `ario.events-v1/events-checkpoint-chain-01.json` | `71a099143d17b6583f12ce132840c1f802951613b7e456d98703bc87625c7f54` |
+| `negatives/negative-malformed-minor-00.json` | `31758aa41471bd17521a94c16d44057b7415eb905d1c7852e0086852fd5f39c1` |
+| `negatives/negative-malformed-minor-01.json` | `6d3f22d01c4a0f2dc8979dae2aef3ae9c0821a990fc26eca344ac78b75d7c30f` |
+| `negatives/negative-malformed-minor-02.json` | `b437b44ea6d793bb4b5a0483e046fc08219b5a3b40dc2f2db2c7ead6132b0f3c` |
+| `negatives/negative-lone-surrogate-00.json` | `c89a558c5efc6b0bbf9e82c104dd29d0315bfbefcc56c7ccaea8b81c60e848ed` |
+| `negatives/negative-missing-payload-hash-00.json` | `a2818add7d61e0de56b2782e91b3a69275e3ec07b81f258aff7c65657cb999cb` |
+
+The chained vector's two checkpoints each verify full-family through `verifyEnvelope`; the negatives cover malformed `spec_version` minors (#13), a lone UTF-16 surrogate (JCS reject-only), and a missing `payload_hash` (§2). Folded into both kernels' conformance + the agent's vendored copy at this tag.
+
 ## Verifying a vendored copy
 
 ```bash
