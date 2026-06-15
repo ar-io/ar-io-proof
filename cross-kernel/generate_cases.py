@@ -124,9 +124,13 @@ def corpus_cases(repo_root: Path) -> list[dict]:
         cases.append({"id": f"corpus-{path.stem}", "envelope": env, "payload_bytes": None})
 
     # ario.events/v1 external-commitment vectors (verified WITH committed bytes).
+    # The chained-checkpoint vector has a multi-window shape (no single
+    # expected_outputs) — handled separately below.
     events_dir = vectors_dir / "ario.events-v1"
     if events_dir.is_dir():
         for path in sorted(events_dir.glob("events-*.json")):
+            if "-chain-" in path.name:
+                continue
             v = json.loads(path.read_text())
             out = v["expected_outputs"]
             env = json.loads(bytes.fromhex(out["envelope_jcs_bytes_hex"]))
@@ -138,25 +142,74 @@ def corpus_cases(repo_root: Path) -> list[dict]:
                     "payload_bytes": record_bytes,
                 }
             )
+        # Each checkpoint window of the chained vector is itself a complete
+        # signed envelope verified with its committed record bytes.
+        for chain_path in sorted(events_dir.glob("events-checkpoint-chain-*.json")):
+            v = json.loads(chain_path.read_text())
+            for i, w in enumerate(v["windows"]):
+                out = w["expected_outputs"]
+                env = json.loads(bytes.fromhex(out["envelope_jcs_bytes_hex"]))
+                record_bytes = bytes.fromhex(out["payload_jcs_bytes_hex"])
+                cases.append(
+                    {
+                        "id": f"corpus-{chain_path.stem}-w{i + 1}",
+                        "envelope": env,
+                        "payload_bytes": record_bytes,
+                    }
+                )
     return cases
+
+
+def negative_cases(repo_root: Path) -> list[dict]:
+    """The v1.2 negatives: complete envelope BYTES a conformant verifier MUST
+    reject. Carried as ``envelope_bytes_hex`` (the lone-surrogate case is not a
+    well-formed envelope dict), with the Python verdict recorded — every leg
+    must agree it does NOT verify."""
+    neg_dir = repo_root / "test-vectors" / "negatives"
+    cases: list[dict] = []
+    if not neg_dir.is_dir():
+        return cases
+    for path in sorted(neg_dir.glob("*.json")):
+        n = json.loads(path.read_text())
+        cases.append(
+            {
+                "id": f"corpus-negative-{path.stem}",
+                "envelope_bytes_hex": n["envelope_bytes_hex"],
+            }
+        )
+    return cases
+
+
+def _verdict(res) -> dict:
+    return {
+        "ok": res.ok,
+        "phk": res.payload_hash_ok,
+        "sig": res.signature_ok,
+        "spec": res.spec_version_ok,
+    }
 
 
 def main() -> int:
     repo_root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1]
-    cases = corpus_cases(repo_root) + adversarial_cases()
+    cases = corpus_cases(repo_root) + adversarial_cases() + negative_cases(repo_root)
 
     for c in cases:
+        if "envelope_bytes_hex" in c:
+            # Negative: verify the raw bytes; a parse failure (lone surrogate)
+            # is itself a rejection. Every leg must agree it does NOT verify.
+            raw = bytes.fromhex(c["envelope_bytes_hex"])
+            try:
+                res = verify_envelope(json.loads(raw))
+                c["py"] = _verdict(res)
+            except Exception:
+                c["py"] = {"ok": False, "phk": False, "sig": False, "spec": False}
+            c["payload_b64"] = None
+            assert c["py"]["ok"] is False, f"{c['id']} is a negative but Python accepted it"
+            continue
+
         pb = c.pop("payload_bytes")
-        # allow_legacy=False everywhere; the events profile is not yet accepted,
-        # so its corpus cases verify as rejections — agreement on rejection is
-        # still agreement. (Flip to accepted at ratification + re-baseline.)
         res = verify_envelope(c["envelope"], payload_bytes=pb)
-        c["py"] = {
-            "ok": res.ok,
-            "phk": res.payload_hash_ok,
-            "sig": res.signature_ok,
-            "spec": res.spec_version_ok,
-        }
+        c["py"] = _verdict(res)
         c["payload_b64"] = base64.b64encode(pb).decode() if pb is not None else None
 
     json.dump(cases, sys.stdout, indent=2, sort_keys=True)

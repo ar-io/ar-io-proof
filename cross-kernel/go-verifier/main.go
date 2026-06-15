@@ -13,6 +13,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -21,10 +22,11 @@ import (
 )
 
 type kase struct {
-	ID         string         `json:"id"`
-	Envelope   map[string]any `json:"envelope"`
-	PayloadB64 *string        `json:"payload_b64"`
-	Py         struct {
+	ID               string         `json:"id"`
+	Envelope         map[string]any `json:"envelope"`
+	EnvelopeBytesHex string         `json:"envelope_bytes_hex"`
+	PayloadB64       *string        `json:"payload_b64"`
+	Py               struct {
 		OK bool `json:"ok"`
 	} `json:"py"`
 }
@@ -47,12 +49,22 @@ func main() {
 
 	mismatches := 0
 	for _, c := range cases {
-		envJSON, _ := json.Marshal(c.Envelope)
 		var verr error
-		if c.PayloadB64 != nil {
+		if c.EnvelopeBytesHex != "" {
+			// Negative: verify the raw bytes verbatim (the same bytes the
+			// other legs see — esp. the lone-surrogate case).
+			raw, derr := hex.DecodeString(c.EnvelopeBytesHex)
+			if derr != nil {
+				fmt.Fprintf(os.Stderr, "%s: bad envelope_bytes_hex: %v\n", c.ID, derr)
+				os.Exit(2)
+			}
+			_, verr = proof.VerifyEnvelope(raw)
+		} else if c.PayloadB64 != nil {
 			pb, _ := base64.StdEncoding.DecodeString(*c.PayloadB64)
+			envJSON, _ := json.Marshal(c.Envelope)
 			_, verr = proof.VerifyEnvelopeWithPayload(envJSON, pb)
 		} else {
+			envJSON, _ := json.Marshal(c.Envelope)
 			_, verr = proof.VerifyEnvelope(envJSON)
 		}
 		goOK := verr == nil

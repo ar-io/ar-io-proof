@@ -14,10 +14,23 @@ const cases = JSON.parse(readFileSync(casesPath, "utf8"));
 
 let mismatches = 0;
 for (const c of cases) {
-  const opts = {};
-  if (c.payload_b64 !== null) opts.payloadBytes = Uint8Array.from(Buffer.from(c.payload_b64, "base64"));
-  const r = await verifyEnvelope(c.envelope, opts);
-  const ts = { ok: r.ok, phk: r.payloadHashOk, sig: r.signatureOk, spec: r.specVersionOk };
+  let ts;
+  if (c.envelope_bytes_hex !== undefined) {
+    // Negative: verify the raw bytes; a parse failure mirrors Python's
+    // exception fallback (all-false). The verdict must be ok:false either way.
+    try {
+      const env = JSON.parse(Buffer.from(c.envelope_bytes_hex, "hex").toString("utf8"));
+      const r = await verifyEnvelope(env);
+      ts = { ok: r.ok, phk: r.payloadHashOk, sig: r.signatureOk, spec: r.specVersionOk };
+    } catch {
+      ts = { ok: false, phk: false, sig: false, spec: false };
+    }
+  } else {
+    const opts = {};
+    if (c.payload_b64 !== null) opts.payloadBytes = Uint8Array.from(Buffer.from(c.payload_b64, "base64"));
+    const r = await verifyEnvelope(c.envelope, opts);
+    ts = { ok: r.ok, phk: r.payloadHashOk, sig: r.signatureOk, spec: r.specVersionOk };
+  }
   // Full tri-state comparison — TS exposes payloadHashOk, so it must match
   // Python's None/true/false exactly, not just the boolean verdict.
   if (JSON.stringify(ts) !== JSON.stringify(c.py)) {
