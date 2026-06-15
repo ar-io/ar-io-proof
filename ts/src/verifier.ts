@@ -16,10 +16,12 @@ import type { ContentRole, Envelope, VerificationResult, VerifyOptions } from ".
 // exactly the accepted profile majors, nothing else. Minors within an accepted
 // major ("ario.agent/v1.<minor>") are additive and tolerated — matching the Go
 // reference kernel's semantics (pkg/proof isSupportedSpec) so the JS and
-// WASM-Go verifiers agree. Accepting a new profile (e.g. ario.mlflow/v1) is a
-// deliberate one-entry addition HERE and only here — mlflow-dialect behaviors
-// (like its underscore-key strip) must never leak into the agent profile.
-const ACCEPTED_SPEC_MAJORS = ["ario.agent/v1"];
+// WASM-Go verifiers agree. Accepting a new profile is a deliberate one-entry
+// addition HERE and only here. ario.events/v1 (external commitment + Minimal
+// disclosure; envelope-spec §4) is verified through the SAME primitives — the
+// signed scope is still envelope-minus-signature-minus-co_signatures, with no
+// profile-specific dialect (no underscore strip, that is mlflow-only).
+const ACCEPTED_SPEC_MAJORS = ["ario.agent/v1", "ario.events/v1"];
 
 // RFC 8785 (JCS) canonicalization. The `canonicalize` package is the reference
 // JS implementation; correctness is pinned by the conformance vectors.

@@ -222,14 +222,14 @@ describe("merkle conformance vs ar-io-agent test-vectors", () => {
 
 // --- ario.events/v1 conformance (corpus v1.1 additive set) ------------------
 //
-// The Anchoring SDK's profile (envelope-spec v1.2, registered *proposed*).
-// Gated at the PRIMITIVE level (canonical bytes + payload hash + Ed25519 +
-// RFC 9162 Merkle), NOT through verifyEnvelope: ario.events/v1 is
-// external-commitment + Minimal and is not in the accept-set, so the profile
-// accept-gate correctly rejects it. The committed payload is the external
-// `event_record`; the on-wire envelope carries only its payload_hash + a
-// payload_ref locator. Python reproduces signatures from the seed; TS (a
-// verify-only kernel) independently verifies them — the cross-language gate.
+// The Anchoring SDK's profile (envelope-spec v1.3, ratified). Gated at the
+// PRIMITIVE level (canonical bytes + payload hash + Ed25519 + RFC 9162 Merkle)
+// AND through verifyEnvelope now that the profile is in the accept-set: full
+// bind with the committed record bytes, undetermined (signature-only) without
+// them — the external-commitment contract (envelope-spec §3/§3.1/§6.2). The
+// committed payload is the external `event_record`; the on-wire envelope
+// carries only its payload_hash + a payload_ref locator. Python reproduces
+// signatures from the seed; TS independently verifies them — cross-language.
 const CORPUS_EVENTS_SHA256: Record<string, string> = {
   "events-event-01.json": "ac4f81cf4be28da92ac49fe2461084598dde876a28d252bf997005f34b8903e4",
   "events-event-02.json": "d1ab4b6f3cb6ab1f5f33e345a2c6f80c99bedbf10c9ec482ff8a45279e49fb27",
@@ -250,6 +250,7 @@ interface EventsVector {
     payload_hash_hex: string;
     envelope_for_sig_jcs_bytes_hex: string;
     signature_hex: string;
+    envelope_jcs_bytes_hex: string;
   };
   merkle?: {
     expected_root_hex: string;
@@ -282,6 +283,23 @@ async function gateEventsEnvelope(v: EventsVector): Promise<void> {
   expect(await ed25519Verify(out.signature_hex, utf8(bytesToHex(msg) + "00"), pub)).toBe(false);
   const forged = out.signature_hex.slice(0, -2) + (out.signature_hex.slice(-2) === "00" ? "ff" : "00");
   expect(await ed25519Verify(forged, msg, pub)).toBe(false);
+
+  // Full-family gate (ratified, envelope-spec v1.3): the COMPLETE signed
+  // envelope verifies through verifyEnvelope in external-commitment mode.
+  const complete = JSON.parse(
+    new TextDecoder().decode(hexToBytes(out.envelope_jcs_bytes_hex)),
+  ) as Envelope;
+  const recordBytes = utf8(jcs(v.inputs.event_record));
+  const bound = await verifyEnvelope(complete, { payloadBytes: recordBytes });
+  expect(bound.ok).toBe(true);
+  expect(bound.signatureOk).toBe(true);
+  expect(bound.payloadHashOk).toBe(true); // committed bytes match
+  // Signature-only (no committed bytes): valid but semantics-undetermined.
+  const undetermined = await verifyEnvelope(complete);
+  expect(undetermined.ok).toBe(true);
+  expect(undetermined.payloadHashOk).toBe(null);
+  // Wrong committed bytes must fail the bind.
+  expect((await verifyEnvelope(complete, { payloadBytes: utf8("wrong") })).ok).toBe(false);
 }
 
 describe("corpus integrity (test-vectors-v1.1 — ario.events/v1)", () => {

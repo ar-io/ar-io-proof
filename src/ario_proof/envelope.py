@@ -53,7 +53,9 @@ __all__ = [
 # ``<namespace>/v<major>[.<minor>]``): a v1 verifier accepts additive
 # minors (``ario.agent/v1.3``) but never a different major
 # (``ario.agent/v10``) or a non-numeric minor (malformed).
-ACCEPTED_SPEC_VERSIONS = frozenset({"ario.agent/v1", "ario.mlflow/v1"})
+ACCEPTED_SPEC_VERSIONS = frozenset(
+    {"ario.agent/v1", "ario.mlflow/v1", "ario.events/v1"}
+)
 
 # Fields excluded from the signed scope. ``signature`` is appended after
 # signing; ``co_signatures`` is reserved by envelope-spec §7.1 for

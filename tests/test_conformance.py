@@ -46,12 +46,13 @@ CORPUS_SHA256 = {
 ENVELOPE_VECTOR_FILES = sorted(VECTORS_DIR.glob("envelope-*.json"))
 MERKLE_VECTOR_FILES = sorted(VECTORS_DIR.glob("merkle-tree-*.json"))
 
-# ario.events/v1 (proposed profile, envelope-spec v1.2) — the corpus v1.1
-# additive set, homed in a profile subdirectory. Gated at the PRIMITIVE level
-# (canonical bytes + payload hash + Ed25519 + RFC 9162 Merkle), deliberately
-# NOT through verify_envelope: ario.events/v1 is external-commitment + Minimal
-# and is not in the accept-set, so the profile accept-gate would correctly
-# reject it. Pinned from test-vectors/CORPUS-v1.md (corpus tag test-vectors-v1.1).
+# ario.events/v1 (ratified profile, envelope-spec v1.3) — the corpus additive
+# set, homed in a profile subdirectory. Gated at the PRIMITIVE level (canonical
+# bytes + payload hash + Ed25519 + RFC 9162 Merkle) AND through verify_envelope
+# now that the profile is in the accept-set: full bind with the committed
+# record bytes, undetermined (signature-only) without them — the
+# external-commitment contract (envelope-spec §3/§3.1/§6.2). Pinned from
+# test-vectors/CORPUS-v1.md.
 EVENTS_DIR = VECTORS_DIR / "ario.events-v1"
 CORPUS_EVENTS_SHA256 = {
     "events-event-01.json": "ac4f81cf4be28da92ac49fe2461084598dde876a28d252bf997005f34b8903e4",
@@ -135,6 +136,19 @@ def _gate_events_envelope(v: dict) -> None:
     forged = bytearray(bytes.fromhex(out["signature_hex"]))
     forged[0] ^= 0xFF
     assert not verify_signature(message, bytes(forged).hex(), kp["ed25519_public_hex"])
+
+    # Full-family gate (ratified, envelope-spec v1.3): the COMPLETE signed
+    # envelope verifies through verify_envelope in external-commitment mode.
+    complete = json.loads(bytes.fromhex(out["envelope_jcs_bytes_hex"]))
+    record_bytes = canonical_json(record)
+    bound = verify_envelope(complete, payload_bytes=record_bytes)
+    assert bound.ok and bound.signature_ok
+    assert bound.payload_hash_ok is True  # committed bytes match
+    # Signature-only (no committed bytes): valid but semantics-undetermined.
+    undetermined = verify_envelope(complete)
+    assert undetermined.ok and undetermined.payload_hash_ok is None
+    # Wrong committed bytes must fail the bind.
+    assert not verify_envelope(complete, payload_bytes=b"wrong").ok
 
 
 @pytest.mark.parametrize("path", EVENTS_EVENT_FILES, ids=lambda p: p.stem)
