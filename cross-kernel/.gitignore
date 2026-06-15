@@ -1,0 +1,4 @@
+cases.json
+.venv/
+go-verifier/agent-src/
+# vendor-agent/ IS committed (vendored MIT pkg/proof) — not ignored
