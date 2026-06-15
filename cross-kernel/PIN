@@ -1,11 +1,8 @@
 # Pinned ar-io-agent commit for the Go leg of the cross-kernel agreement gate.
-# The Go kernel (pkg/proof) is materialized at this commit by run.sh — a
-# detached git worktree from a sibling ../ar-io-agent checkout, same pattern
-# as the proof-checker's wasm/PIN. Re-pin (and re-baseline cases.json) is a
-# deliberate act, never a floating HEAD.
-#
-# NOTE: currently pins the kernel/full-family branch tip (PR #20), which
-# carries the external-commitment + §2 + #13 behavior this gate asserts.
-# Re-pin to the merged-main commit once #20 lands.
-agent_commit=ca18a7bf32b72898b16fe6fe0c90b529b84201af
+# The MIT-carved-out pkg/proof is VENDORED at this commit under
+# vendor-agent/pkg/proof/ (see vendor-agent/pkg/proof/VENDORING.md). The Go leg
+# builds the vendored source — no private-repo access, runs on public/fork PRs.
+# Re-pin = re-sync the vendored files + bump this commit (a deliberate act,
+# never a floating HEAD).
+agent_commit=ebe2ecd60395328ff67e28f0ec4fd9e78f42da06
 go_version=go1.25.0

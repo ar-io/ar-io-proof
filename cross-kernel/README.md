@@ -18,25 +18,25 @@ proof-checker's JS↔WASM(Go) agreement gate, extended to the Python reference.
 |---|---|---|
 | Python | in-repo `src/ario_proof` | the **reference** verdicts (full tri-state) |
 | TypeScript | in-repo `ts/dist` | **full tri-state** match (`payloadHashOk` null/true/false) |
-| Go | ar-io-agent `pkg/proof` @ [`PIN`](PIN) | **verdict-level** match (`pkg/proof.VerifyEnvelope` is all-or-nothing) |
+| Go | **vendored** ar-io-agent `pkg/proof` @ [`PIN`](PIN) | **verdict-level** match (`pkg/proof.VerifyEnvelope` is all-or-nothing) |
 
-The Go leg builds the *same* kernel `ariod verify` runs, materialized at the
-pinned commit via a detached `git worktree` from a sibling `../ar-io-agent`
-checkout — the proof-checker `wasm/PIN` pattern. It is **optional**: without an
-available agent checkout it SKIPS loudly (so public-PR CI never fails on missing
-private-repo access), but Python+TS always run.
+The Go leg builds the *same* kernel `ariod verify` runs, **vendored** under
+[`vendor-agent/pkg/proof/`](vendor-agent/pkg/proof/VENDORING.md) at the pinned
+commit (the MIT-carved-out kernel — `LICENSE` preserved). Vendoring (vs
+token-cloning the private repo) means all three legs run on **public and fork
+PRs** with no secret, so the tri-kernel gate is load-bearing for everyone.
 
 ## Run
 
 ```bash
-bash cross-kernel/run.sh                          # Python + TS (+ Go if ../ar-io-agent present)
-AGENT_SRC=/path/to/ar-io-agent bash cross-kernel/run.sh   # force a specific agent checkout
+bash cross-kernel/run.sh   # Python + TS + Go, no external checkout needed
 ```
 
-`cases.json` is generated (never committed); re-pinning the Go kernel (`PIN`)
-or changing kernel behavior re-baselines it on the next run.
+`cases.json` is generated (never committed); changing any kernel re-baselines
+it on the next run.
 
 ## Re-pin
 
-Update `PIN`'s `agent_commit` to a new ar-io-agent commit, re-run, and commit
-`PIN`. Re-pin is a deliberate act, never a floating HEAD.
+To track a new ar-io-agent kernel: bump `PIN`'s `agent_commit` and re-sync the
+vendored files (see [`vendor-agent/pkg/proof/VENDORING.md`](vendor-agent/pkg/proof/VENDORING.md)),
+then commit. A deliberate act, never a floating HEAD.

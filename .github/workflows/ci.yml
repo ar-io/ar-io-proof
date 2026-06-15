@@ -66,16 +66,8 @@ jobs:
         run: |
           pip install -e .[dev]
           (cd ts && npm ci)
-      - name: Materialize ar-io-agent at PIN (Go leg, best-effort)
-        env:
-          AGENT_REPO_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
-        run: |
-          pin="$(grep '^agent_commit=' cross-kernel/PIN | cut -d= -f2)"
-          if [ -n "$AGENT_REPO_TOKEN" ]; then
-            git clone --no-checkout "https://x-access-token:${AGENT_REPO_TOKEN}@github.com/ar-io/ar-io-agent.git" ../ar-io-agent
-            git -C ../ar-io-agent fetch origin "$pin" || true
-          else
-            echo "AGENT_REPO_TOKEN unset — Go leg will SKIP (Python+TS still gate)"
-          fi
       - name: Cross-kernel agreement (Python + TS + Go)
-        run: AGENT_SRC="$PWD/../ar-io-agent" bash cross-kernel/run.sh
+        # Go leg builds the VENDORED ar-io-agent pkg/proof (cross-kernel/
+        # vendor-agent, pinned in cross-kernel/PIN) — no private-repo access,
+        # so all three legs run on public and fork PRs.
+        run: bash cross-kernel/run.sh
