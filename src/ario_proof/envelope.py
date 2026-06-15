@@ -225,7 +225,9 @@ def verify_envelope(
     payload_hash_ok: bool | None
     if not isinstance(stored_hash, str):
         payload_hash_ok = False
-        errors.append("missing payload_hash (envelope-spec §2: required in every profile)")
+        errors.append(
+            "missing payload_hash (envelope-spec §2: required in every profile)"
+        )
     else:
         checks: list[bool] = []
         if "payload" in envelope:
