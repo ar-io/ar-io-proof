@@ -26,7 +26,6 @@ from pathlib import Path
 import jcs
 from nacl.signing import SigningKey
 
-
 # Fixed test seed — published in source so every implementer can reproduce.
 # NEVER use this seed for real signing. The corresponding Arweave address
 # is well-known too; treat the keypair as test fixture, not secret.
@@ -127,12 +126,15 @@ def audit_path(m: int, leaf_hashes: list[bytes]) -> list[bytes]:
     return audit_path(m - k, leaf_hashes[k:]) + [mth(leaf_hashes[:k])]
 
 
-def merkle_tree_vector(*, vector_id: str, description: str, leaf_objects: list[dict]) -> dict:
+def merkle_tree_vector(
+    *, vector_id: str, description: str, leaf_objects: list[dict]
+) -> dict:
     """Build a Merkle tree vector with inclusion proofs for first/last/middle leaves."""
     hashes = [leaf_hash(lo) for lo in leaf_objects]
     root = mth(hashes)
     leaves_with_hashes = [
-        {"leaf_object": lo, "leaf_hash_hex": h.hex()} for lo, h in zip(leaf_objects, hashes)
+        {"leaf_object": lo, "leaf_hash_hex": h.hex()}
+        for lo, h in zip(leaf_objects, hashes)
     ]
     n = len(leaf_objects)
     if n == 1:
@@ -375,12 +377,36 @@ def make_leaves(n: int) -> list[dict]:
 
 
 MERKLE_VECTORS = [
-    {"vector_id": "merkle-tree-01-leaves", "description": "Single-leaf RFC 9162 tree", "n": 1},
-    {"vector_id": "merkle-tree-02-leaves", "description": "Two-leaf RFC 9162 tree", "n": 2},
-    {"vector_id": "merkle-tree-03-leaves", "description": "Three-leaf RFC 9162 tree (smallest odd-leaf case)", "n": 3},
-    {"vector_id": "merkle-tree-07-leaves", "description": "Seven-leaf RFC 9162 tree (asymmetric subtrees)", "n": 7},
-    {"vector_id": "merkle-tree-16-leaves", "description": "Sixteen-leaf RFC 9162 tree (power-of-two)", "n": 16},
-    {"vector_id": "merkle-tree-1024-leaves", "description": "1024-leaf RFC 9162 tree (large case)", "n": 1024},
+    {
+        "vector_id": "merkle-tree-01-leaves",
+        "description": "Single-leaf RFC 9162 tree",
+        "n": 1,
+    },
+    {
+        "vector_id": "merkle-tree-02-leaves",
+        "description": "Two-leaf RFC 9162 tree",
+        "n": 2,
+    },
+    {
+        "vector_id": "merkle-tree-03-leaves",
+        "description": "Three-leaf RFC 9162 tree (smallest odd-leaf case)",
+        "n": 3,
+    },
+    {
+        "vector_id": "merkle-tree-07-leaves",
+        "description": "Seven-leaf RFC 9162 tree (asymmetric subtrees)",
+        "n": 7,
+    },
+    {
+        "vector_id": "merkle-tree-16-leaves",
+        "description": "Sixteen-leaf RFC 9162 tree (power-of-two)",
+        "n": 16,
+    },
+    {
+        "vector_id": "merkle-tree-1024-leaves",
+        "description": "1024-leaf RFC 9162 tree (large case)",
+        "n": 1024,
+    },
 ]
 
 
@@ -632,9 +658,259 @@ def events_vectors() -> list[dict]:
     return [vec_1, vec_2, checkpoint_vec]
 
 
+# ---------------------------------------------------------------------------
+# test-vectors-v1.2 additive candidates (kernel-ratification lane, Scope D)
+#
+# These do NOT alter any existing vector's bytes (the v1.1 set is pinned). Two
+# new artifacts:
+#   - events-checkpoint-chain-01: per-batcher checkpoint CONTINUITY across two
+#     windows — window-2's checkpoint record previous_hash = SHA-256(JCS(
+#     window-1 checkpoint record)). events-checkpoint-01 pins a single window;
+#     this pins the chain link the batcher draws between windows.
+#   - negatives/: inputs a conformant verifier MUST REJECT — malformed
+#     spec_version minor (#13), lone UTF-16 surrogate (JCS reject-only), and a
+#     missing payload_hash (envelope-spec §2). A new corpus category; each
+#     carries the complete envelope BYTES + the expected rejection.
+# ---------------------------------------------------------------------------
+
+
+def _checkpoint_over(
+    *,
+    vector_id,
+    leaf_contents,
+    previous_hash,
+    chain_key,
+    base_event_id,
+    signed_at,
+    window,
+):
+    """Build a checkpoint vector over leaf_contents, chaining to previous_hash.
+
+    Returns the sign_events vector with a ``merkle`` block (leaves, root,
+    inclusion proofs) — identical construction to events-checkpoint-01, but
+    parameterized by previous_hash + chain_key so two windows can chain.
+    """
+    subject = {"type": "producer", "producer_id": "acme-app"}
+    leaf_envelopes, leaf_vectors = [], []
+    for i, content in enumerate(leaf_contents):
+        record = {
+            "payload_version": 1,
+            "spec_version": EVENTS_SPEC_VERSION,
+            "event_type": "event",
+            "subject": subject,
+            "previous_hash": "GENESIS",
+            "event": {
+                "content_hash": hashlib.sha256(content).hexdigest(),
+                "content_length": len(content),
+            },
+            "context": {},
+            "metadata": {},
+            "extras": {},
+        }
+        vec = sign_events_envelope_vector(
+            vector_id=f"{vector_id}-leaf-{i}",
+            description=f"{vector_id} leaf {i} (not written standalone)",
+            event_record=record,
+            envelope_pre_signature={
+                "spec_version": EVENTS_SPEC_VERSION,
+                "event_id": f"{base_event_id}{i:04d}",
+                "signed_at": signed_at,
+                "environment": "dev",
+            },
+        )
+        env = dict(vec["inputs"]["envelope_pre_signature"])
+        env["payload_hash"] = vec["expected_outputs"]["payload_hash_hex"]
+        env["public_key"] = vec["fixed_keypair"]["ed25519_public_hex"]
+        env["signature"] = vec["expected_outputs"]["signature_hex"]
+        leaf_envelopes.append(env)
+        leaf_vectors.append(vec)
+
+    hashes = [leaf_hash(e) for e in leaf_envelopes]
+    root = mth(hashes)
+    checkpoint_record = {
+        "payload_version": 1,
+        "spec_version": EVENTS_SPEC_VERSION,
+        "event_type": "checkpoint",
+        "subject": subject,
+        "previous_hash": previous_hash,
+        "event": {
+            "merkle_root": root.hex(),
+            "leaf_count": len(leaf_envelopes),
+            "window": window,
+        },
+        "context": {"chain_key": chain_key},
+        "metadata": {},
+        "extras": {},
+    }
+    cp = sign_events_envelope_vector(
+        vector_id=vector_id,
+        description=f"{vector_id} checkpoint over {len(leaf_contents)} leaves",
+        event_record=checkpoint_record,
+        envelope_pre_signature={
+            "spec_version": EVENTS_SPEC_VERSION,
+            "event_id": base_event_id + "ffff",
+            "signed_at": signed_at,
+            "environment": "dev",
+        },
+    )
+    cp["merkle"] = {
+        "leaves": [
+            {
+                "envelope_jcs_bytes_hex": leaf_vectors[i]["expected_outputs"][
+                    "envelope_jcs_bytes_hex"
+                ],
+                "leaf_hash_hex": hashes[i].hex(),
+            }
+            for i in range(len(leaf_contents))
+        ],
+        "expected_root_hex": root.hex(),
+        "inclusion_proofs": [
+            {
+                "leaf_index": i,
+                "audit_path_hex": [h.hex() for h in audit_path(i, hashes)],
+            }
+            for i in range(len(leaf_contents))
+        ],
+    }
+    return cp
+
+
+def events_checkpoint_chain_vector() -> dict:
+    """Two chained checkpoints: window-2.previous_hash = window-1 record hash."""
+    chain_key = "batcher:chain-demo"
+    w1 = _checkpoint_over(
+        vector_id="events-checkpoint-chain-01-w1",
+        leaf_contents=[b"w1-leaf-0", b"w1-leaf-1"],
+        previous_hash="GENESIS",
+        chain_key=chain_key,
+        base_event_id="5c6d7e8f-0a1b-4c2d-8e3f-",
+        signed_at="2026-06-15T00:00:00.000Z",
+        window={"start": "2026-06-15T00:00:00.000Z", "end": "2026-06-15T00:01:00.000Z"},
+    )
+    w1_record_hash = w1["expected_outputs"]["payload_hash_hex"]
+    w2 = _checkpoint_over(
+        vector_id="events-checkpoint-chain-01-w2",
+        leaf_contents=[b"w2-leaf-0", b"w2-leaf-1", b"w2-leaf-2"],
+        previous_hash=w1_record_hash,  # the chain link being pinned
+        chain_key=chain_key,
+        base_event_id="6d7e8f90-1b2c-4d3e-9f4a-",
+        signed_at="2026-06-15T00:01:30.000Z",
+        window={"start": "2026-06-15T00:01:00.000Z", "end": "2026-06-15T00:02:00.000Z"},
+    )
+    return {
+        "vector_id": "events-checkpoint-chain-01",
+        "description": (
+            "ario.events/v1 per-batcher checkpoint continuity: two windows on "
+            "one chain_key; window-2's checkpoint record previous_hash equals "
+            "SHA-256(JCS(window-1 checkpoint record)). Each checkpoint is a "
+            "complete signed envelope verifiable through verifyEnvelope."
+        ),
+        "spec_version": EVENTS_SPEC_VERSION,
+        "profile": {"payload_mode": "external_commitment", "disclosure": "minimal"},
+        "fixed_keypair": w1["fixed_keypair"],
+        "chain_key": chain_key,
+        "windows": [w1, w2],
+        "chain_link": {
+            "window1_record_hash": w1_record_hash,
+            "window2_previous_hash": w2["inputs"]["event_record"]["previous_hash"],
+        },
+    }
+
+
+def negative_vectors() -> list[dict]:
+    """Inputs a conformant verifier MUST reject. Each carries the complete
+    envelope BYTES (hex) + the expected rejection; the conformance gate parses
+    and verifies the bytes and asserts the envelope does NOT verify."""
+    seed = bytes.fromhex(FIXED_SEED_HEX)
+    sk = SigningKey(seed)
+    pub_hex = sk.verify_key.encode().hex()
+    record = {"k": "v"}
+    record_hash = hashlib.sha256(jcs.canonicalize(record)).hexdigest()
+
+    def signed_bytes(env_no_sig: dict) -> bytes:
+        env = dict(env_no_sig)
+        env["payload_hash"] = record_hash
+        env["public_key"] = pub_hex
+        sig = sk.sign(jcs.canonicalize(env)).signature.hex()
+        env["signature"] = sig
+        return jcs.canonicalize(env)
+
+    negatives = []
+
+    # 1. malformed spec_version minor (#13) — otherwise a valid signature.
+    for i, bad in enumerate(
+        ["ario.agent/v1.x", "ario.agent/v1.3abc", "ario.agent/v1."]
+    ):
+        b = signed_bytes(
+            {
+                "spec_version": bad,
+                "event_id": "1f0e9a4c-3b2d-4d5e-8f6a-7b8c9d0e1f2a",
+                "signed_at": "2026-06-15T00:00:00Z",
+            }
+        )
+        negatives.append(
+            {
+                "vector_id": f"negative-malformed-minor-{i:02d}",
+                "description": f"spec_version {bad!r}: non-numeric/empty minor token is malformed (#13)",
+                "category": "spec_version",
+                "envelope_bytes_hex": b.hex(),
+                "expect": {"accepts": False, "reason": "unsupported_spec_version"},
+            }
+        )
+
+    # 2. lone UTF-16 surrogate in a string field (JCS reject-only). Built as
+    #    raw bytes: a JSON document whose signed_at carries a \uD800 escape.
+    #    (Signature validity is moot — a conformant verifier rejects at the
+    #    JCS/parse layer before trusting any field.)
+    base = {
+        "spec_version": "ario.agent/v1",
+        "event_id": "1f0e9a4c-3b2d-4d5e-8f6a-7b8c9d0e1f2a",
+        "payload_hash": record_hash,
+        "public_key": pub_hex,
+        "signature": "00" * 64,
+    }
+    # canonicalize the non-surrogate skeleton, then splice a lone-surrogate
+    # field in as raw JSON text so the byte stream contains \uD800.
+    body = jcs.canonicalize(base).decode("ascii")
+    assert body.endswith("}")
+    lone = body[:-1] + ',"signed_at":"2026-06-15T00:00:00Z \\uD800"}'
+    negatives.append(
+        {
+            "vector_id": "negative-lone-surrogate-00",
+            "description": "lone high surrogate \\uD800 in a string field: not representable as UTF-8; reject at JCS/parse",
+            "category": "encoding",
+            "envelope_bytes_hex": lone.encode("ascii").hex(),
+            "expect": {"accepts": False, "reason": "lone_surrogate"},
+        }
+    )
+
+    # 3. missing payload_hash (envelope-spec §2) — valid signature over the
+    #    payload_hash-less scope.
+    env = {
+        "spec_version": "ario.agent/v1",
+        "event_id": "1f0e9a4c-3b2d-4d5e-8f6a-7b8c9d0e1f2a",
+        "signed_at": "2026-06-15T00:00:00Z",
+        "public_key": pub_hex,
+    }
+    sig = sk.sign(jcs.canonicalize(env)).signature.hex()
+    env["signature"] = sig
+    negatives.append(
+        {
+            "vector_id": "negative-missing-payload-hash-00",
+            "description": "no payload_hash field: §2 requires it; hard reject in every mode",
+            "category": "payload_hash",
+            "envelope_bytes_hex": jcs.canonicalize(env).hex(),
+            "expect": {"accepts": False, "reason": "missing_payload_hash"},
+        }
+    )
+    return negatives
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("output_dir", type=Path, help="where to write vector JSON files")
+    parser.add_argument(
+        "output_dir", type=Path, help="where to write vector JSON files"
+    )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -654,6 +930,22 @@ def main() -> int:
         written += 1
         print(f"  wrote ario.events-v1/{out.name}")
 
+    # test-vectors-v1.2 additive: chained two-checkpoint vector.
+    chain_vec = events_checkpoint_chain_vector()
+    chain_out = events_dir / f"{chain_vec['vector_id']}.json"
+    chain_out.write_text(json.dumps(chain_vec, indent=2, sort_keys=True) + "\n")
+    written += 1
+    print(f"  wrote ario.events-v1/{chain_out.name}")
+
+    # test-vectors-v1.2 additive: negative vectors (must-reject inputs).
+    negatives_dir = args.output_dir / "negatives"
+    negatives_dir.mkdir(parents=True, exist_ok=True)
+    for vec in negative_vectors():
+        out = negatives_dir / f"{vec['vector_id']}.json"
+        out.write_text(json.dumps(vec, indent=2, sort_keys=True) + "\n")
+        written += 1
+        print(f"  wrote negatives/{out.name}")
+
     for spec in MERKLE_VECTORS:
         leaves = make_leaves(spec["n"])
         vec = merkle_tree_vector(
@@ -669,7 +961,7 @@ def main() -> int:
     # Empty checkpoint vector — pinned literal root from artifact.md §8.
     empty_vec = {
         "vector_id": "merkle-tree-00-leaves",
-        "description": "Empty RFC 9162 tree — root is SHA-256(\"\") per spec",
+        "description": 'Empty RFC 9162 tree — root is SHA-256("") per spec',
         "leaf_count": 0,
         "leaves": [],
         "expected_root_hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
