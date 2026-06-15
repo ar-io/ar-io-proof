@@ -321,7 +321,20 @@ def test_missing_fields_never_raise() -> None:
     assert not result.ok
     assert not result.spec_version_ok
     assert not result.signature_ok
-    assert result.payload_hash_ok is None
+    # envelope-spec §2: a missing payload_hash is a hard reject, not undetermined.
+    assert result.payload_hash_ok is False
+
+
+def test_missing_payload_hash_is_rejected() -> None:
+    # A signed external-commitment-shaped envelope that omits payload_hash
+    # must fail the binding (§2), independent of the signature.
+    env = agent_envelope()
+    env.pop("payload", None)
+    env.pop("payload_hash", None)
+    result = verify_envelope(env)
+    assert result.payload_hash_ok is False
+    assert not result.ok
+    assert any("payload_hash" in e for e in result.errors)
 
 
 def test_unserializable_payload_never_raises() -> None:
