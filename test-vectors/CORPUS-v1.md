@@ -1,6 +1,6 @@
-# Conformance corpus — v1.0 (+ v1.1 additive set)
+# Conformance corpus — v1.0 (+ v1.1, v1.2 additive sets)
 
-> **Corpus tag: `test-vectors-v1.0`**, extended by **`test-vectors-v1.1`** (the additive `ario.events/v1` set in [§ Contents added at v1.1](#contents-added-at-v11)). Locked at the standards ratification of 2026-06-10 per [`docs/stack/governance.md`](../docs/stack/governance.md) §4: corpus changes from here are minor bumps (`test-vectors-v1.x`); any change to the bytes of a file listed below is major (`test-vectors-v2.0`, 30-day RFC). Every conformant downstream pins a corpus tag and records which. v1.1 is **purely additive** — every v1.0 vector is byte-unchanged, so a v1.0 pin stays valid; downstreams adopt v1.1 only to gate the new `ario.events/v1` profile.
+> **Corpus tag: `test-vectors-v1.0`**, extended additively by **`test-vectors-v1.1`** (the `ario.events/v1` set in [§ Contents added at v1.1](#contents-added-at-v11)) and **`test-vectors-v1.2`** (the chained two-checkpoint vector + must-reject `negatives/` in [§ Contents added at v1.2](#contents-added-at-v12)). Locked at the standards ratification of 2026-06-10 per [`docs/stack/governance.md`](../docs/stack/governance.md) §4: corpus changes from here are minor bumps (`test-vectors-v1.x`); any change to the bytes of a file listed below is major (`test-vectors-v2.0`, 30-day RFC). Every conformant downstream pins a corpus tag and records which. Each minor is **purely additive** — every earlier vector is byte-unchanged, so an older pin stays valid; downstreams adopt a newer tag only to gate the vectors it adds.
 
 ## Scope
 
@@ -60,4 +60,4 @@ The chained vector's two checkpoints each verify full-family through `verifyEnve
 sha256sum envelope-*.json merkle-*.json README.md   # compare against the table above
 ```
 
-Known downstream pins: `ar-io-proof` (Python kernel, vendors at `test-vectors-v1.0`), `ar-io-proof-checker` (JS verifier conformance gate), `ar-io-mlflow` cross-product, `tools/ans104-conformance`.
+Known downstream pins: `ar-io-proof` (Python + TS kernels, gate at `test-vectors-v1.2`), `ar-io-proof-checker` (JS verifier conformance gate), `ar-io-anchor` (vendors the `ario.events/v1` set at `test-vectors-v1.1`), `ar-io-mlflow` cross-product, `tools/ans104-conformance`.

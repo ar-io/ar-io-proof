@@ -9,7 +9,7 @@ kernel; producers and verifiers import these.
 - **Python** — `ario_proof` (PyPI [`ar-io-proof`](https://pypi.org/project/ar-io-proof/)), at the repo root.
 - **TypeScript** — [`@ar.io/proof`](https://www.npmjs.com/package/@ar.io/proof) (npm), in [`ts/`](ts/).
 
-Both reproduce the same `test-vectors-v1.0` corpus byte-for-byte; that mutual conformance
+Both reproduce the same `test-vectors-v1.2` corpus byte-for-byte; that mutual conformance
 gate is the point — anyone can verify ar.io provenance with no ar.io code in the trust path.
 
 ```bash
@@ -104,27 +104,32 @@ It also ships the RFC 9162 Merkle primitives (`leafHash` / `merkleRoot` / `audit
 
 ## What these kernels implement
 
-- The **Verifiable Event Envelope** family contract, `envelope-spec.md` **v1.1 (ratified
-  v1.0 2026-06-10, amended 2026-06-11 — additive, same conformance corpus)**, for two
-  profiles:
+- The **Verifiable Event Envelope** family contract, `envelope-spec.md` **v1.3 (ratified
+  2026-06-15 — additive through every amendment; `ario.events/v1` admitted to the
+  accept-set, all three kernels full-family)**, for three profiles:
   - **`ario.agent/v1`** — inline-payload envelopes minted by
     [`ar-io-agent`](https://github.com/ar-io/ar-io-agent) (byte-level format:
     `docs/artifact.md`).
   - **`ario.mlflow/v1`** — external-commitment envelopes minted by
     [`ar-io-mlflow`](https://github.com/ar-io/ar-io-mlflow).
+  - **`ario.events/v1`** — external-commitment, Minimal-disclosure envelopes minted by
+    the Anchoring SDK [`ar-io-anchor`](https://github.com/ar-io/ar-io-anchor) /
+    [`@ar.io/anchor`](https://www.npmjs.com/package/@ar.io/anchor).
 - The **RFC 9162** binary Merkle tree (leaf/node domain separation, audit paths, pinned
   empty-tree root) and the **`ario.agent.proof/v1`** inclusion-proof bundle behind agent
   verification checkpoints.
-- The **accepted-version registry**: `{ario.agent/v1, ario.mlflow/v1}`, matched on the
-  `v<major>` token boundary per envelope-spec §2 — additive minors (`ario.agent/v1.3`)
-  are accepted within a major; different majors (`ario.agent/v10`) and malformed minors
-  fail closed. Envelopes that predate `spec_version` verify only with an explicit
-  `allow_legacy=True`.
+- The **accepted-profile registry**, matched on the `v<major>` token boundary per
+  envelope-spec §2: the Python kernel admits `{ario.agent/v1, ario.mlflow/v1,
+  ario.events/v1}`; the TypeScript kernel admits `{ario.agent/v1, ario.events/v1}` and
+  omits `ario.mlflow/v1` (whose underscore-prefixed-annotation dialect is Python-only).
+  Additive minors (`ario.agent/v1.3`) are accepted within a major; different majors
+  (`ario.agent/v10`) and malformed minors fail closed. Envelopes that predate
+  `spec_version` verify only with an explicit `allow_legacy=True`.
 - The signed scope per the ratified contract: the envelope minus `signature`, minus the
   reserved `co_signatures` field (envelope-spec §7.1), and — for `ario.mlflow/v1` and
   legacy envelopes only — minus underscore-prefixed annotation keys. The `ario.agent/v1`
-  signed scope is minus `signature`/`co_signatures` only, matching the Go reference
-  byte-for-byte.
+  and `ario.events/v1` signed scopes are minus `signature`/`co_signatures` only, matching
+  the Go reference byte-for-byte.
 
 The kernel is exactly the five primitives in the stack architecture's kernel scope — **no
 I/O, no networking, no key lifecycle**. Gateway fetching, attestation polling, and key
@@ -132,8 +137,9 @@ storage belong to the products that import this.
 
 ## Conformance
 
-This package is conformance-gated against the `ario.agent/v1` corpus at tag
-**`test-vectors-v1.0`**, vendored under [`test-vectors/`](test-vectors/) byte-for-byte (see
+This package is conformance-gated against the family corpus at tag
+**`test-vectors-v1.2`** (the `ario.agent/v1` and `ario.events/v1` vectors plus the
+must-reject negatives), vendored under [`test-vectors/`](test-vectors/) byte-for-byte (see
 [`test-vectors/VENDORING.md`](test-vectors/VENDORING.md) for provenance). CI asserts, for
 every vector: JCS-canonical bytes, payload hashes, envelope-for-signature bytes,
 deterministic signatures, Merkle roots, and audit paths — exact to the byte. If this
@@ -178,7 +184,7 @@ the **single home of every conformant kernel** the stack ships (the Go reference
 `ar-io-agent/pkg/proof`, MIT-carved):
 
 - [`specs/envelope-spec.md`](specs/envelope-spec.md) — the producer-neutral Verifiable
-  Event Envelope family contract (ratified v1.0, amended v1.1)
+  Event Envelope family contract (ratified v1.0, amended through v1.3)
 - [`specs/evidence-bundle.md`](specs/evidence-bundle.md) — `ario.evidence/v1` report
   wrapper (ratified v1.0, not yet implemented)
 - [`specs/architecture.md`](specs/architecture.md) — kernel / producer / connector /
@@ -186,7 +192,7 @@ the **single home of every conformant kernel** the stack ships (the Go reference
 - [`specs/governance.md`](specs/governance.md) — who decides, how (BDFL, async docs-PR,
   corpus-tag governance, amendment log)
 - [`test-vectors/`](test-vectors/) — the conformance corpus, locked at
-  `test-vectors-v1.0` (per-file SHA-256 in [`CORPUS-v1.md`](test-vectors/CORPUS-v1.md)),
+  `test-vectors-v1.2` (per-file SHA-256 in [`CORPUS-v1.md`](test-vectors/CORPUS-v1.md)),
   generated by [`tools/gen-vectors/`](tools/gen-vectors/) — generated, never hand-edited
 - [`ts/`](ts/) — the **TypeScript kernel** (`@ar.io/proof` on npm), conformance-gated
   against the same `test-vectors/` corpus; moved here 2026-06-11 from the proof-checker app
