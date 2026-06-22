@@ -38,6 +38,15 @@ bundler` won't add them — this bit `0.1.1`, fixed in `0.1.2`). Kernel changes 
 changes: byte-for-byte conformance is the gate, and the Python and Go kernels must stay in
 lockstep (escalate divergences per `specs/governance.md` §6).
 
+**Bundle verify + the CLI live HERE, not in `@ar.io/anchor`** (the kernel is the producer-neutral
+verifier — an auditor must not need the write SDK). `src/evidence.ts` = `verifyEvidenceBundle`
+(signed `ario.evidence/v1` / `ario.anchor.trace/v1` bundles); `src/agent-proof.ts` =
+`verifyAgentProofBundle` (`ario.agent.proof/v1`); `src/cli.ts` = the `bin: proof` →
+`npx @ar.io/proof verify <bundle> [gateways]` (sniffs `spec_version`, so one verb covers anchor +
+agent; pinned exit codes `0/1/2/3`). Bundle *emit* (`toEvidenceBundle`) lives in `@ar.io/anchor`.
+Implemented on `main`; the `bin` ships on the next `ts-v*` tag. Cross-repo round-trip is pinned by
+`ts/test/fixtures/anchor-trace-bundle.golden.json` (a real @ar.io/anchor bundle, frozen).
+
 ## Commands
 
 ```bash
