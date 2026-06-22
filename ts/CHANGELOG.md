@@ -6,6 +6,8 @@ pre-1.0, so minor versions may include behavior changes.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-22
+
 Evidence-bundle verifier + turnkey CLI (evidence-bundle + verify-CLI lane).
 
 ### Added
