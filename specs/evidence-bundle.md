@@ -120,8 +120,57 @@ A bundle MAY itself be anchored to Arweave (it's just signed JSON with tags), in
 | ar-io-agent inclusion proof | `ario.agent.proof/v1` | existing §10 bundle | `ed25519` | Optional wrapper; §10 bundle already self-verifies. Lets it carry a verdict + render in the shared UI. |
 | ar-io-mlflow `audit --format=json` | `ario.mlflow.audit/v1` | existing `{model,version,stages[],overall_ok,…}` | `ed25519` | **+sign, +issuer.** `overall_ok` → `verdict.status`. |
 | ar-io-verify run bundle | `verify.bundle.run/v1` | existing `VerificationBundleV1` (renamed body, see note) | `rsa-pss-sha256` | Wrap its existing RSA-PSS-signed body; the wrapper signature can reuse the same operator key via `signature_alg`. `totals` → `verdict.counts`. |
+| `@ar.io/anchor` SDK trace | `ario.anchor.trace/v1` | `{ checkpoints[], events[] }` (§5.1) | `ed25519` | A self-verifying serialization of `InclusionReceipt[]` — the SDK's per-event signed envelopes + their checkpoints + inclusion proofs in one portable, offline-verifiable file. New body, **not a new wrapper.** |
 
 > Note on ar-io-verify: its body uses `camelCase` and an integer `version` internally. Those stay **inside the body** (no forced rewrite of a shipped product); the wrapper normalizes the *outer* contract. The body's internal RSA-PSS `signature` remains its own per-body attestation; the wrapper signature is the family-level one. This is the pragmatic "how far does verify bend" answer from `reporting-parity.md` §4.
+
+### 5.1. `ario.anchor.trace/v1` — the anchor SDK trace body
+
+`@ar.io/anchor` Merkle-batches high-frequency events into one Arweave write per window, handing each event back an `InclusionReceipt` (the event's signed `ario.events/v1` envelope + its committed record + its RFC 9162 inclusion proof + the checkpoint it lands in). A producer collects a set of these receipts and serializes them into a single, portable, self-verifying trace via `toEvidenceBundle(receipts)`. The result is an `ario.evidence/v1` wrapper (§2) whose `body_type` is `ario.anchor.trace/v1` and whose `body` is:
+
+```json
+{
+  "checkpoints": [
+    {
+      "tx_id": "<arweave-txid>",
+      "envelope": { /* the signed checkpoint ario.events/v1 envelope */ },
+      "record_bytes": "<hex of JCS(checkpoint record)>",
+      "merkle_root": "<hex>"
+    }
+  ],
+  "events": [
+    {
+      "envelope": { /* the signed event ario.events/v1 envelope */ },
+      "record_bytes": "<hex of JCS(event record)>",
+      "inclusion": {
+        "leaf_hash": "<hex>",
+        "leaf_index": 0,
+        "leaf_count": 3,
+        "audit_path": ["<hex>", "…"],
+        "checkpoint_tx_id": "<arweave-txid>"
+      }
+    }
+  ]
+}
+```
+
+| Field | Required | Type | Meaning |
+|---|---|---|---|
+| `checkpoints[]` | Yes | array | The window checkpoints the events land in. **De-duplicated:** events that share one anchored window reference one entry here, so the shared checkpoint envelope is carried once. |
+| `checkpoints[].tx_id` | Yes | string | The Arweave TX the checkpoint envelope was anchored as. The on-chain re-fetch key. |
+| `checkpoints[].envelope` | Yes | object | The signed checkpoint envelope (external commitment — its committed record is `record_bytes`). |
+| `checkpoints[].record_bytes` | Yes | hex | Lowercase hex of `JCS(checkpoint record)`; binds to the checkpoint envelope's `payload_hash` and carries the committed `merkle_root` / `leaf_count`. |
+| `checkpoints[].merkle_root` | Yes | hex | The Merkle root every event in this window proves inclusion against. A verifier **MUST** confirm it equals the `merkle_root` inside the committed `record_bytes` (recompute, don't trust). |
+| `events[]` | Yes | array | The traced events. |
+| `events[].envelope` | Yes | object | The event's signed envelope (external commitment — committed record is `record_bytes`). |
+| `events[].record_bytes` | Yes | hex | Lowercase hex of `JCS(event record)`; binds to the event envelope's `payload_hash`. A withheld record (`record_bytes` omitted) leaves the binding **undetermined, not failed** (§3.1/§6.2). |
+| `events[].inclusion` | Yes | object | The RFC 9162 inclusion proof binding this event's leaf to its checkpoint root. |
+| `events[].inclusion.leaf_hash` | Yes | hex | `SHA-256(0x00 ‖ JCS(event envelope))` — the leaf is the event's signed envelope bytes (profile §6), not its record. |
+| `events[].inclusion.leaf_index` / `leaf_count` | Yes | int | Position and tree size for the audit-path walk. |
+| `events[].inclusion.audit_path[]` | Yes | hex[] | Bottom-up sibling hashes. |
+| `events[].inclusion.checkpoint_tx_id` | Yes | string | Binds this event to exactly one entry in `checkpoints[]`. A verifier **MUST** resolve it to a present checkpoint and verify inclusion against *that* checkpoint's `merkle_root`. |
+
+`Uint8Array` fields (`record_bytes`, every hash / audit-path entry) serialize as **lowercase hex**, the family convention. The wrapper is signed by the producer's Ed25519 key (the anchorer's signer); `body_hash = SHA-256(JCS(body))` commits to the whole trace. Verification (the inverse of `toEvidenceBundle`) re-checks each event's signature + payload binding + inclusion offline against the embedded `public_key`, with an optional on-chain re-fetch of each `checkpoint_tx_id`; the reference implementation is `verifyEvidenceBundle` in [`@ar.io/proof`](https://www.npmjs.com/package/@ar.io/proof) (`npx @ar.io/proof verify <bundle>`).
 
 ## 6. Trust model (must hold for every consumer)
 
