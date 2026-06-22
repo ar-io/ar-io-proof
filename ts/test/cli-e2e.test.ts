@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +50,27 @@ function runCliProcess(args: string[]): Promise<RunResult> {
     const child = spawn(process.execPath, [CLI, ...args], {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, NO_COLOR: "1" }, // deterministic, un-escaped output
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
+  });
+}
+
+// Run the built CLI via a SYMLINK to dist/cli.js — exactly how `npx @ar.io/proof`
+// and `node_modules/.bin/proof` invoke it (process.argv[1] is the symlink, not the
+// resolved module path). Regression guard for the is-main symlink bug fixed after 0.2.1.
+async function runCliViaSymlink(args: string[]): Promise<RunResult> {
+  const dir = await mkdtemp(join(tmpdir(), "proof-bin-"));
+  const link = join(dir, "proof");
+  await symlink(CLI, link);
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [link, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, NO_COLOR: "1" },
     });
     let stdout = "";
     let stderr = "";
@@ -206,6 +227,14 @@ describe("CLI subprocess — pinned exit codes (evidence bundle)", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/VERIFIED/);
     expect(r.stdout).toMatch(/ario\.anchor\.trace\/v1/);
+  });
+
+  it("exit 0 + VERIFIED when invoked via a bin SYMLINK (the npx / node_modules/.bin path)", async () => {
+    // Regression: a naive import.meta-vs-argv[1] main-guard skips main() under a
+    // symlinked bin, so `npx @ar.io/proof verify` silently no-ops (exit 0, no output).
+    const r = await runCliViaSymlink(["verify", GOLDEN]);
+    expect(r.stdout).toMatch(/VERIFIED/);
+    expect(r.code).toBe(0);
   });
 
   it("exit 0 + VERIFIED on a freshly built evidence bundle", async () => {
