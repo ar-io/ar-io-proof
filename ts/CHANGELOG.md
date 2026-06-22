@@ -6,6 +6,17 @@ pre-1.0, so minor versions may include behavior changes.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-06-22
+
+### Fixed
+
+- **CLI `npx @ar.io/proof verify` was a silent no-op.** The `is-main` guard
+  compared `import.meta.url` to `process.argv[1]`, which differ when the bin
+  runs through a symlink (`npx` / `node_modules/.bin/proof` → `dist/cli.js`):
+  `main()` was skipped, so the command exited 0 with no output. The guard now
+  `realpath`s both sides. Added a CLI e2e test that invokes via a symlink so
+  this can't regress. **0.2.1's CLI does not work; use 0.2.2.**
+
 ## [0.2.1] — 2026-06-22
 
 Evidence-bundle verifier + turnkey CLI (evidence-bundle + verify-CLI lane).

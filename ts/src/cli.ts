@@ -15,6 +15,8 @@
 // surfaces as a per-event note — it does NOT fail the run.
 
 import { readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { isAgentProofSpec, verifyAgentProofBundle } from "./agent-proof.js";
 import type { AgentProofResult } from "./agent-proof.js";
@@ -271,8 +273,11 @@ function shortId(id: string): string {
 // Entry point when run as a binary (not when imported by tests).
 const isMain = (() => {
   try {
-    const invoked = process.argv[1] ? new URL(`file://${process.argv[1]}`).href : "";
-    return import.meta.url === invoked || (process.argv[1]?.endsWith("cli.js") ?? false);
+    if (!process.argv[1]) return false;
+    // realpath BOTH sides: when run via a bin symlink (npx / node_modules/.bin/proof
+    // -> dist/cli.js), process.argv[1] is the symlink and import.meta.url is the target,
+    // so a naive compare skips main(). Resolving both to the real path makes them match.
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
   } catch {
     return false;
   }
