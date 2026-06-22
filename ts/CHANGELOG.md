@@ -4,6 +4,35 @@ All notable changes to the TypeScript verification kernel. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); this project is
 pre-1.0, so minor versions may include behavior changes.
 
+## [Unreleased]
+
+Evidence-bundle verifier + turnkey CLI (evidence-bundle + verify-CLI lane).
+
+### Added
+
+- **`verifyEvidenceBundle(bundle, { gateways?, fetchImpl? })`** — verifies a
+  signed `ario.evidence/v1` wrapper carrying the `ario.anchor.trace/v1` body
+  (the `@ar.io/anchor` SDK trace: per-event signed envelopes + their
+  checkpoints + RFC 9162 inclusion proofs). Reject-unknown-major → verify the
+  wrapper signature + recompute `body_hash` → per-checkpoint envelope +
+  `merkle_root` recompute → per-event signature + payload binding +
+  inclusion-against-its-checkpoint-root, with the asserted `verdict` surfaced
+  but never trusted. Optional on-chain re-fetch of each `checkpoint_tx_id`.
+  `payloadHashOk === null` (a withheld record) is semantics-undetermined, not a
+  failure. New exported types: `EvidenceBundle`, `EvidenceBundleResult`,
+  `AnchorTraceBody`, `TraceCheckpoint`, `TraceEvent`, `TraceInclusion`,
+  `CheckpointResult`, `EventResult`, `EvidenceStatus`, `VerifyEvidenceOptions`,
+  plus the `ANCHOR_TRACE_BODY_TYPE` constant.
+- **`verifyAgentProofBundle(bundle, { gateways?, fetchImpl? })`** +
+  `isAgentProofSpec` — verifies the agent's `ario.agent.proof/v1` inclusion
+  bundle (ar-io-agent artifact.md §10), so one verifier covers both anchor and
+  agent producers.
+- **CLI `bin`: `npx @ar.io/proof verify <bundle.json> [comma,sep,gateways]`.**
+  Sniffs `spec_version` to route between the two bundle shapes; pretty
+  per-event + rollup output; pinned exit codes (mirror `ariod verify-status`):
+  `0` verified · `1` failed · `2` malformed · `3` gateway-unavailable. No new
+  runtime deps — Node ≥18 built-in `fetch`.
+
 ## [0.2.0] — 2026-06-15
 
 Full-family verifier + `ario.events/v1` ratified (kernel-ratification lane).
