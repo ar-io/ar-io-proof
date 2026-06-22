@@ -63,7 +63,7 @@ npx @ar.io/proof verify trace-bundle.json https://arweave.net,https://permagate.
 
 It prints a per-event + rollup verdict and exits on a pinned code — `0` verified · `1` a real failure (bad signature / tamper / broken inclusion) · `2` malformed bundle · `3` gateway-unavailable when an on-chain re-fetch was requested. The producer's asserted `verdict` is shown but **never trusted** — the displayed verdict is always recomputed from the body. The same CLI also verifies the agent's `ario.agent.proof/v1` inclusion bundle (it sniffs `spec_version`), so one command covers anchor + agent.
 
-> The `verify` CLI (`bin: proof`) is implemented on `main` and ships with the next published version. Until then, run it from a checkout (`node ts/dist/cli.js verify …` after `npm run build`) or use `verifyEvidenceBundle` programmatically.
+> The `verify` CLI is live in `@ar.io/proof` ≥ 0.2.2 — `npx @ar.io/proof verify <bundle> [gateways]`. `verifyEvidenceBundle` is the programmatic API.
 
 Programmatically:
 
