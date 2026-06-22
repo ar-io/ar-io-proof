@@ -51,6 +51,35 @@ result.contentRole;   // how it commits: e.g. the registered baseline,
 contentHashes(env);   // all content hashes an envelope commits to, by event type
 ```
 
+## Verify a whole trace bundle — one command
+
+The `@ar.io/anchor` SDK hands a producer a set of `InclusionReceipt`s and can serialize them into one portable, self-verifying `ario.evidence/v1` bundle (`body_type: ario.anchor.trace/v1`). Verify the entire bundle — every event's signature + payload binding + Merkle inclusion, all offline — with the bundled CLI:
+
+```bash
+npx @ar.io/proof verify trace-bundle.json
+# also re-fetch each checkpoint on-chain to confirm it's anchored:
+npx @ar.io/proof verify trace-bundle.json https://arweave.net,https://permagate.io
+```
+
+It prints a per-event + rollup verdict and exits on a pinned code — `0` verified · `1` a real failure (bad signature / tamper / broken inclusion) · `2` malformed bundle · `3` gateway-unavailable when an on-chain re-fetch was requested. The producer's asserted `verdict` is shown but **never trusted** — the displayed verdict is always recomputed from the body. The same CLI also verifies the agent's `ario.agent.proof/v1` inclusion bundle (it sniffs `spec_version`), so one command covers anchor + agent.
+
+Programmatically:
+
+```ts
+import { verifyEvidenceBundle } from "@ar.io/proof";
+
+const bundle = JSON.parse(await fs.readFile("trace-bundle.json", "utf8"));
+const result = await verifyEvidenceBundle(bundle, { gateways: ["https://arweave.net"] });
+
+result.status;       // "verified" | "partial" | "failed" | "malformed" (recomputed)
+result.signatureOk;  // wrapper Ed25519 signature
+result.bodyHashOk;   // body_hash === SHA-256(JCS(body))
+result.checkpoints;  // per-checkpoint envelope / merkle-root / on-chain results
+result.events;       // per-event signature / payload-binding / inclusion results
+```
+
+A withheld `record_bytes` (external commitment, record not disclosed) leaves that event's payload binding **undetermined** — surfaced, never failed (the bundle stays cryptographically sound).
+
 ## Verify a Merkle inclusion proof
 
 Agents close daily checkpoints over per-cycle leaves (RFC 9162, §2.1 domain separation — not the Bitcoin duplicate-leaf variant). Verify a leaf's inclusion against an anchored root:
@@ -71,7 +100,9 @@ const ok = await verifyInclusion(
 
 | Export | What it does |
 |---|---|
-| `verifyEnvelope(env, expectedContentHash?)` | The three load-bearing checks (spec-version registry, payload-hash recompute, Ed25519 over the signed scope) + optional content bind. Returns `VerificationResult`. |
+| `verifyEnvelope(env, optionsOrContentHash?)` | The three load-bearing checks (spec-version registry, payload-hash recompute, Ed25519 over the signed scope) + optional content bind. Pass `{ payloadBytes }` for external-commitment envelopes. Returns `VerificationResult`. |
+| `verifyEvidenceBundle(bundle, { gateways?, fetchImpl? })` | Verify a signed `ario.evidence/v1` / `ario.anchor.trace/v1` bundle: wrapper signature + `body_hash` + every checkpoint + every event's inclusion, offline (optional on-chain re-fetch). Returns `EvidenceBundleResult`. Powers the `npx @ar.io/proof verify` CLI. |
+| `verifyAgentProofBundle(bundle, { gateways?, fetchImpl? })` / `isAgentProofSpec(v)` | Verify the agent's `ario.agent.proof/v1` inclusion bundle (artifact.md §10). |
 | `contentHashes(env)` | The content hash(es) an envelope commits to, by event type — the reverse-provenance join keys. |
 | `specVersionSupported(v)` | Fail-closed accept-check: `ario.agent/v1` and additive minors (`ario.agent/v1.<n>`). Unknown majors/profiles are rejected. |
 | `jcs(value)` | RFC 8785 canonical JSON bytes. |
