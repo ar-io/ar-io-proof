@@ -6,6 +6,27 @@ pre-1.0, so minor versions may include behavior changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Raw-log (content) verification for evidence bundles.** `verifyEvidenceBundle`
+  now closes the final `rawLog → content_hash` link of the anchor-trace chain:
+  it recomputes `SHA-256` of disclosed raw bytes and binds them to the committed
+  `event.content_hash` (read from `record_bytes`; for a promoted-disclosure
+  envelope, the envelope's own committed hash via `contentHashes`). New
+  `EventResult.contentOk: boolean | null` (`true` match · `false` mismatch →
+  the event and rollup fail · `null` undetermined when nothing is disclosed or
+  nothing is committed — never a failure, mirroring `payloadBindingOk`).
+  Disclosed bytes resolve from the signed in-body `events[].content` (new
+  `TraceEvent.content` hex field) first, then the out-of-band
+  `VerifyEvidenceOptions.content` (`Record<event_id, Uint8Array | string>`); an
+  in-body-vs-side-input disagreement fails the event.
+- **CLI `--logs <file.json>`** — feeds the out-of-band side input (a JSON object
+  mapping `event_id` → bytes; even-length lowercase hex is treated as hex, else
+  utf8 text). Per-event output gains a `logs ✓/✗/~` mark and a
+  `logs: N/M disclosed verified` rollup note. **Exit codes are unchanged** — a
+  content mismatch reaches exit `1` via the failed rollup. In-body
+  `events[].content` is verified automatically (no flag).
+
 ## [0.2.2] — 2026-06-22
 
 ### Fixed

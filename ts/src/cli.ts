@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { isAgentProofSpec, verifyAgentProofBundle } from "./agent-proof.js";
 import type { AgentProofResult } from "./agent-proof.js";
+import { utf8 } from "./crypto.js";
 import { verifyEvidenceBundle } from "./evidence.js";
 import type { EvidenceBundleResult } from "./evidence.js";
 
@@ -75,7 +76,28 @@ export async function runCli(argv: string[], io: Cli): Promise<number> {
     return EXIT_MALFORMED;
   }
 
-  const [bundlePath, gatewayArg] = rest;
+  // Pull the optional `--logs <file>` flag out of the args; the rest are
+  // positional (<bundle> [gateways]). --logs feeds disclosed raw-log bytes for
+  // content verification (the evidence-bundle path only).
+  let logsPath: string | undefined;
+  const positional: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!;
+    if (a === "--logs") {
+      const next = rest[i + 1];
+      if (next === undefined) {
+        io.err("verify: --logs requires a file path");
+        printUsage(io);
+        return EXIT_MALFORMED;
+      }
+      logsPath = next;
+      i++;
+      continue;
+    }
+    positional.push(a);
+  }
+
+  const [bundlePath, gatewayArg] = positional;
   if (!bundlePath) {
     io.err("verify: a bundle file path is required");
     printUsage(io);
@@ -85,6 +107,32 @@ export async function runCli(argv: string[], io: Cli): Promise<number> {
     .split(",")
     .map((g) => g.trim())
     .filter((g) => g.length > 0);
+
+  let content: Record<string, Uint8Array | string> | undefined;
+  if (logsPath !== undefined) {
+    let logsRaw: string;
+    try {
+      logsRaw = await readFile(logsPath, "utf8");
+    } catch (e) {
+      io.err(`cannot read --logs ${logsPath}: ${e instanceof Error ? e.message : String(e)}`);
+      return EXIT_MALFORMED;
+    }
+    let logsParsed: unknown;
+    try {
+      logsParsed = JSON.parse(logsRaw);
+    } catch (e) {
+      io.err(`--logs ${logsPath} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+      return EXIT_MALFORMED;
+    }
+    if (logsParsed === null || typeof logsParsed !== "object" || Array.isArray(logsParsed)) {
+      io.err(`--logs ${logsPath} must be a JSON object mapping event_id → disclosed bytes`);
+      return EXIT_MALFORMED;
+    }
+    content = {};
+    for (const [k, v] of Object.entries(logsParsed as Record<string, unknown>)) {
+      if (typeof v === "string") content[k] = decodeLogValue(v);
+    }
+  }
 
   let raw: string;
   try {
@@ -108,6 +156,11 @@ export async function runCli(argv: string[], io: Cli): Promise<number> {
       : undefined;
 
   if (isAgentProofSpec(specVersion)) {
+    if (content) {
+      // --logs binds raw logs to anchor-trace events; an agent inclusion proof
+      // has no such per-event content. Say so rather than silently ignoring it.
+      io.err("note: --logs has no effect on an ario.agent.proof/v1 bundle (ignored)");
+    }
     const result = await verifyAgentProofBundle(parsed, {
       gateways,
       ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}),
@@ -120,17 +173,32 @@ export async function runCli(argv: string[], io: Cli): Promise<number> {
   // exits 2 with a clear message.
   const result = await verifyEvidenceBundle(parsed, {
     gateways,
+    ...(content ? { content } : {}),
     ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}),
   });
   return reportEvidence(result, bundlePath, gateways, io);
 }
 
+// The --logs side-input lane decides each disclosed value's encoding: a clean,
+// even-length, lowercase-hex string is hex bytes; anything else is utf8 text.
+// (The verifier itself only distinguishes "string ⇒ hex" from "Uint8Array ⇒
+// raw bytes" — the human-facing encoding choice is made here.)
+function decodeLogValue(v: string): Uint8Array | string {
+  if (v.length > 0 && v.length % 2 === 0 && /^[0-9a-f]+$/.test(v)) return v; // hex passthrough
+  return utf8(v); // raw utf8 bytes
+}
+
 function printUsage(io: Cli): void {
-  io.out("Usage: npx @ar.io/proof verify <bundle.json> [gateway1,gateway2,...]");
+  io.out("Usage: npx @ar.io/proof verify <bundle.json> [gateway1,gateway2,...] [--logs <logs.json>]");
   io.out("");
   io.out("Verify an ario.evidence/v1 (ario.anchor.trace/v1) bundle or an");
   io.out("ario.agent.proof/v1 inclusion bundle, fully offline. Supply a");
   io.out("comma-separated gateway list to also re-fetch each checkpoint on-chain.");
+  io.out("");
+  io.out("--logs <logs.json>  Bind disclosed raw logs to each event's committed");
+  io.out("                    content_hash. JSON object mapping event_id → bytes");
+  io.out("                    (even-length lowercase hex ⇒ hex, else utf8 text).");
+  io.out("                    In-body events[].content is verified automatically.");
   io.out("");
   io.out("Exit codes: 0 verified · 1 failed · 2 malformed · 3 gateway-unavailable");
 }
@@ -173,8 +241,12 @@ function reportEvidence(
         ev.payloadBindingOk === null
           ? paint("~ record withheld", Y)
           : `record ${mark(ev.payloadBindingOk)}`;
+      // Show the content (logs) segment only when content was disclosed and
+      // evaluated (non-null) — undisclosed content is the default and would just
+      // be noise on every line.
+      const logs = ev.contentOk === null ? "" : `  logs ${mark(ev.contentOk)}`;
       io.out(
-        `    ${mark(ev.ok)} ${shortId(ev.eventId)}  sig ${mark(ev.envelopeOk)}  ${binding}  inclusion ${mark(ev.inclusionOk)}`,
+        `    ${mark(ev.ok)} ${shortId(ev.eventId)}  sig ${mark(ev.envelopeOk)}  ${binding}  inclusion ${mark(ev.inclusionOk)}${logs}`,
       );
       for (const e of ev.errors) io.out(paint(`        - ${e}`, R));
     }
@@ -183,6 +255,12 @@ function reportEvidence(
   io.out("");
   printRollup(result.status, result.assertedStatus, gateways, result.onChainChecked, io);
   for (const e of result.errors) io.out(paint(`  note: ${e}`, DIM));
+
+  const disclosed = result.events.filter((e) => e.contentOk !== null);
+  if (disclosed.length > 0) {
+    const verified = disclosed.filter((e) => e.contentOk === true).length;
+    io.out(paint(`  logs: ${verified}/${disclosed.length} disclosed verified`, DIM));
+  }
 
   return mapStatusToExit(result.status, result.errors);
 }
