@@ -6,6 +6,8 @@ pre-1.0, so minor versions may include behavior changes.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-30
+
 ### Added
 
 - **Raw-log (content) verification for evidence bundles.** `verifyEvidenceBundle`
