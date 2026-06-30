@@ -18,7 +18,7 @@
 
 import { ed25519Verify, hexToBytes, sha256Hex, utf8 } from "./crypto.js";
 import { leafHash, verifyInclusion } from "./merkle.js";
-import { jcs, verifyEnvelope } from "./verifier.js";
+import { contentHashes, jcs, verifyEnvelope } from "./verifier.js";
 import type { Envelope } from "./types.js";
 
 // Only the evidence-bundle major(s) this kernel verifies. A new major is a
@@ -69,6 +69,10 @@ export interface TraceInclusion {
 export interface TraceEvent {
   envelope: Envelope;
   record_bytes?: string; // hex of JCS(event record); omitted == record withheld
+  // Opt-in disclosed raw bytes (lowercase hex) whose SHA-256 MUST equal the
+  // committed event.content_hash inside record_bytes (evidence-bundle §5.1).
+  // Default-absent (minimal disclosure); absent ⇒ undetermined, not failed.
+  content?: string;
   inclusion: TraceInclusion;
 }
 
@@ -126,6 +130,12 @@ export interface EventResult {
   inclusionOk: boolean;
   // The inclusion's checkpoint_tx_id resolved to a checkpoint in the bundle.
   checkpointBound: boolean;
+  // Raw-log (content) binding: SHA-256 of the disclosed bytes equals the
+  // committed event.content_hash (in record_bytes) — or, for a promoted
+  // envelope, a hash it commits to. true matched, false mismatch (→ event
+  // fails), null undetermined (nothing disclosed OR nothing committed OR record
+  // withheld — NOT a failure, mirroring payloadBindingOk).
+  contentOk: boolean | null;
   ok: boolean;
   errors: string[];
 }
@@ -151,6 +161,12 @@ export interface VerifyEvidenceOptions {
   // When supplied, the on-chain bytes MUST byte-match the bundle's checkpoint
   // envelope, proving the proof is anchored, not just locally asserted.
   gateways?: string[];
+  // Out-of-band disclosed raw bytes, keyed by event_id, to bind against each
+  // event's committed content_hash (the rawLog → content_hash link). A
+  // Uint8Array is used as-is; a string is parsed as lowercase hex. In-body
+  // `events[].content` (signed) takes precedence over this side input; if both
+  // are present for an event and disagree, the event fails (§5.1).
+  content?: Record<string, Uint8Array | string>;
   // Injectable fetch (Node >=18 global `fetch` by default) — test seam.
   fetchImpl?: typeof fetch;
 }
@@ -380,6 +396,7 @@ async function verifyAnchorTrace(
   const eventResults: EventResult[] = [];
   for (const ev of body.events) {
     const evErrors: string[] = [];
+    const eventId = getEventId(ev.envelope);
     let envelopeOk = false;
     let payloadBindingOk: boolean | null = null;
 
@@ -443,16 +460,107 @@ async function verifyAnchorTrace(
       }
     }
 
+    // Content (raw-log) binding — the rawLog → content_hash link the rest of
+    // the chain (content_hash → record → payload_hash → signature → leaf →
+    // root) already covers. The committed hash lives in the RECORD
+    // (record.event.content_hash, minimal disclosure); for a promoted-disclosure
+    // envelope it falls back to the envelope's own committed hashes
+    // (contentHashes — NOT verifyEnvelope's path, which reads payload/event_type
+    // and yields nothing for an ario.events/v1 envelope). Disclosed bytes come
+    // from the signed in-body `ev.content` FIRST, then the out-of-band
+    // options.content side input. Undetermined (null) when nothing is disclosed
+    // or nothing is committed; false ONLY on a real mismatch or an in-body vs
+    // side-input disagreement — mirroring payloadBindingOk's never-fail-on-absent
+    // discipline.
+    let contentOk: boolean | null = null;
+    {
+      const committed: string[] = [];
+      let recordContentHash: string | undefined;
+      if (recordBytes !== undefined) {
+        try {
+          const record = JSON.parse(new TextDecoder().decode(recordBytes)) as {
+            event?: { content_hash?: unknown };
+          };
+          const ch = record.event?.content_hash;
+          if (typeof ch === "string" && ch) recordContentHash = ch.toLowerCase();
+        } catch {
+          // record not JSON — the payload binding already reflects that; content
+          // stays undetermined rather than throwing.
+        }
+      }
+      if (recordContentHash !== undefined) {
+        committed.push(recordContentHash);
+      } else if (ev.envelope && typeof ev.envelope === "object") {
+        // Promoted fallback. Guarded: contentHashes() dereferences env.payload,
+        // which throws on a null/non-object envelope — a verifier must never
+        // raise on adversarial input (such an event already fails via envelopeOk).
+        for (const c of contentHashes(ev.envelope)) committed.push(c.hash.toLowerCase());
+      }
+
+      // Disclosed bytes, precedence: in-body (signed) → side input. A string
+      // side input is hex; a Uint8Array is used as-is.
+      let inBody: Uint8Array | undefined;
+      if (typeof ev.content === "string") {
+        try {
+          inBody = hexToBytes(ev.content);
+        } catch (e) {
+          evErrors.push(`event content is not hex: ${stringifyErr(e)}`);
+        }
+      }
+      let side: Uint8Array | undefined;
+      const sideRaw = options.content?.[eventId];
+      if (sideRaw instanceof Uint8Array) {
+        side = sideRaw;
+      } else if (typeof sideRaw === "string") {
+        try {
+          side = hexToBytes(sideRaw);
+        } catch (e) {
+          evErrors.push(`supplied content for ${eventId} is not hex: ${stringifyErr(e)}`);
+        }
+      }
+
+      if (inBody !== undefined && side !== undefined && !bytesEqual(inBody, side)) {
+        // Two disclosures that disagree: a genuine conflict, not undetermined.
+        contentOk = false;
+        evErrors.push(
+          "disclosed content disagreement: in-body events[].content and the supplied content differ",
+        );
+      } else {
+        const disclosed = inBody ?? side;
+        if (disclosed === undefined || committed.length === 0) {
+          contentOk = null;
+          if (disclosed !== undefined && committed.length === 0) {
+            evErrors.push(
+              "disclosed content present but no committed content_hash to bind to " +
+                "(record withheld or record has no event.content_hash) — undetermined",
+            );
+          }
+        } else {
+          const got = await sha256Hex(disclosed);
+          contentOk = committed.includes(got);
+          if (!contentOk) {
+            evErrors.push(
+              "disclosed content does not match the committed content_hash: " +
+                `sha256(disclosed)=${got} committed=${committed.join("|")}`,
+            );
+          }
+        }
+      }
+    }
+
     eventResults.push({
-      eventId: getEventId(ev.envelope),
+      eventId,
       envelopeOk,
       payloadBindingOk,
       inclusionOk,
       checkpointBound,
+      contentOk,
       // An event is "ok" when its envelope is authentic (signature + binding
-      // not-failed), its inclusion proof reconstructs the root, and it binds to
-      // a present checkpoint. A withheld record (binding null) does not fail it.
-      ok: envelopeOk && inclusionOk && checkpointBound,
+      // not-failed), its inclusion proof reconstructs the root, it binds to a
+      // present checkpoint, and its disclosed content did not MISMATCH. A
+      // withheld record or undisclosed content (binding/content null) does not
+      // fail it.
+      ok: envelopeOk && inclusionOk && checkpointBound && contentOk !== false,
       errors: evErrors,
     });
   }
@@ -582,4 +690,10 @@ function toHex(bytes: Uint8Array): string {
   let out = "";
   for (const x of bytes) out += x.toString(16).padStart(2, "0");
   return out;
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }

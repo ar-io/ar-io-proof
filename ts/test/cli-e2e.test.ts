@@ -229,6 +229,30 @@ describe("CLI subprocess — pinned exit codes (evidence bundle)", () => {
     expect(r.stdout).toMatch(/ario\.anchor\.trace\/v1/);
   });
 
+  it("exit 0 + surfaces the logs mark for the golden's in-body disclosed event", async () => {
+    // The golden discloses event 0's raw bytes in-body (events[].content); the
+    // CLI hashes them, confirms the match, and prints a "logs ✓" segment + tally.
+    const r = await runCliProcess(["verify", GOLDEN]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/VERIFIED/);
+    expect(r.stdout).toMatch(/logs/);
+  });
+
+  it("exit 0 + binds a withheld event's content via --logs (side input)", async () => {
+    const golden = JSON.parse(await readFile(GOLDEN, "utf8")) as {
+      body: { events: { envelope: { event_id: string } }[] };
+    };
+    const ev1Id = golden.body.events[1]!.envelope.event_id;
+    // Event 1 disclosed no in-body content; supply its raw bytes out-of-band.
+    // decodeLogValue treats a non-hex string as utf8 — "fixture-event-1" is the
+    // exact data event 1 anchored.
+    const logsPath = await writeFixture("logs.json", { [ev1Id]: "fixture-event-1" });
+    const r = await runCliProcess(["verify", GOLDEN, "--logs", logsPath]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/VERIFIED/);
+    expect(r.stdout).toMatch(/logs/);
+  });
+
   it("exit 0 + VERIFIED when invoked via a bin SYMLINK (the npx / node_modules/.bin path)", async () => {
     // Regression: a naive import.meta-vs-argv[1] main-guard skips main() under a
     // symlinked bin, so `npx @ar.io/proof verify` silently no-ops (exit 0, no output).
