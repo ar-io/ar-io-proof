@@ -132,6 +132,15 @@ function eid(i: number): string {
   return `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
 }
 
+// Re-sign the wrapper after a deliberate in-body mutation, so a test isolates a
+// body-content edge from the wrapper signature (mirrors the producer flow).
+async function reSign(bundle: EvidenceBundle): Promise<void> {
+  bundle.body_hash = await sha256Hex(utf8(jcs(bundle.body)));
+  const { signature: _s, ...pre } = bundle;
+  bundle.public_key = await pubHex();
+  bundle.signature = bytesToHex(await ed.signAsync(utf8(jcs(pre)), seed()));
+}
+
 describe("evidence content — in-body disclosure", () => {
   it("genuine in-body content verifies (contentOk:true, status verified)", async () => {
     const raw = utf8("the genuine raw log line");
@@ -341,6 +350,22 @@ describe("evidence content — adversarial & mixed", () => {
     expect(r.status).toBe("failed");
   });
 
+  it("invalid-hex in-body content does not throw — error surfaced, contentOk:null", async () => {
+    const raw = utf8("the genuine bytes");
+    const e = await signEvent(await logRecord(raw, 0), EID);
+    // A signed body whose `content` is not valid hex (a producer bug, not a
+    // tamper — tampering breaks body_hash+sig). Must not raise; content stays
+    // undetermined and the event still verifies on signature + binding.
+    const bundle = await buildBundle([{ envelope: e.envelope, recordBytes: e.recordBytes }]);
+    (bundle.body as { events: { content?: string }[] }).events[0]!.content = "nothex!!";
+    await reSign(bundle);
+
+    const r = await verifyEvidenceBundle(bundle); // must resolve, not throw
+    expect(r.events[0]!.contentOk).toBe(null);
+    expect(r.events[0]!.ok).toBe(true);
+    expect(r.events[0]!.errors.join(" ")).toMatch(/content is not hex/i);
+  });
+
   it("mixed disclosure across events: one content-verified, one undisclosed", async () => {
     const raw0 = utf8("disclosed event zero");
     const raw1 = utf8("undisclosed event one");
@@ -356,5 +381,41 @@ describe("evidence content — adversarial & mixed", () => {
     expect(r.events[0]!.contentOk).toBe(true);
     expect(r.events[1]!.contentOk).toBe(null);
     expect(r.events.every((e) => e.ok)).toBe(true);
+  });
+
+  it("a record that binds but is not JSON does not throw — content undetermined", async () => {
+    // record_bytes hashes to payload_hash (binds) but isn't JSON, so the
+    // committed content_hash can't be read. The JSON.parse catch must keep
+    // content undetermined (null), never raise; the event still verifies.
+    const recordBytes = utf8("this is not json at all");
+    const pre: Record<string, unknown> = {
+      spec_version: "ario.events/v1",
+      event_id: EID,
+      payload_hash: await sha256Hex(recordBytes),
+      signed_at: "2026-06-22T00:00:00Z",
+      environment: "dev",
+      public_key: await pubHex(),
+    };
+    const sig = await ed.signAsync(utf8(jcs(pre)), seed());
+    const envelope = { ...pre, signature: bytesToHex(sig) };
+    const bundle = await buildBundle([{ envelope, recordBytes, content: utf8("anything") }]);
+
+    const r = await verifyEvidenceBundle(bundle); // must resolve, not throw
+    expect(r.events[0]!.payloadBindingOk).toBe(true); // bytes still bind
+    expect(r.events[0]!.contentOk).toBe(null);
+    expect(r.events[0]!.ok).toBe(true);
+  });
+
+  it("a non-hex STRING side input does not throw — error surfaced, contentOk:null", async () => {
+    // options.content accepts Uint8Array | string(hex); a malformed (non-hex)
+    // string must be handled gracefully (hexToBytes catch), not thrown.
+    const raw = utf8("committed bytes");
+    const { envelope, recordBytes } = await signEvent(await logRecord(raw, 0), EID);
+    const bundle = await buildBundle([{ envelope, recordBytes }]);
+
+    const r = await verifyEvidenceBundle(bundle, { content: { [EID]: "not-hex-zz" } });
+    expect(r.events[0]!.contentOk).toBe(null); // no usable disclosed bytes
+    expect(r.events[0]!.ok).toBe(true);
+    expect(r.events[0]!.errors.join(" ")).toMatch(/not hex/i);
   });
 });

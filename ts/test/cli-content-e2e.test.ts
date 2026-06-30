@@ -264,6 +264,23 @@ describe("CLI content — --logs side input", () => {
     expect(r.code).toBe(2);
   });
 
+  it("exit 2 when --logs has no following path", async () => {
+    const bundle = await buildContentBundle();
+    const p = await writeFixture("logs-noarg.json", bundle);
+    const r = await runCliProcess(["verify", p, "--logs"]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--logs requires a file path/);
+  });
+
+  it("exit 2 when --logs is valid JSON but not an object", async () => {
+    const bundle = await buildContentBundle();
+    const p = await writeFixture("logs-array.json", bundle);
+    const logsPath = await writeFixture("logs-array.logs.json", ["not", "an", "object"]);
+    const r = await runCliProcess(["verify", p, "--logs", logsPath]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/must be a JSON object/);
+  });
+
   it("usage mentions --logs", async () => {
     const r = await runCliProcess(["help"]);
     expect(r.code).toBe(0);

@@ -27,6 +27,9 @@ pre-1.0, so minor versions may include behavior changes.
   content mismatch reaches exit `1` via the failed rollup. In-body
   `events[].content` is verified automatically (no flag).
 
+  _Reported by Will Kempster ([@kempsterrrr](https://github.com/kempsterrrr)), with a
+  working consumer-side reference at `kempsterrrr/verifiable-vercel`._
+
 ## [0.2.2] — 2026-06-22
 
 ### Fixed
