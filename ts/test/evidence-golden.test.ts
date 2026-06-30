@@ -86,6 +86,21 @@ describe("golden ario.anchor.trace/v1 fixture — emitted by @ar.io/anchor", () 
     expect(r.assertedStatus).toBe("verified");
     expect(r.status).toBe("verified");
   });
+
+  it("the disclosed event binds contentOk:true; undisclosed events stay null", async () => {
+    const bundle = await loadGolden();
+    const r = await verifyEvidenceBundle(bundle);
+    // Event 0 disclosed its raw bytes in-body (events[].content) — the kernel
+    // hashes them and confirms they ARE the bytes whose hash was anchored.
+    expect(r.events[0]!.contentOk).toBe(true);
+    // Events 1 & 2 disclosed no content: undetermined, NOT a failure (mirrors a
+    // withheld record's payloadBindingOk:null).
+    expect(r.events[1]!.contentOk).toBe(null);
+    expect(r.events[2]!.contentOk).toBe(null);
+    // Content disclosure neither breaks the rollup nor any event.
+    expect(r.status).toBe("verified");
+    expect(r.events.every((e) => e.ok)).toBe(true);
+  });
 });
 
 describe("golden fixture — a tampered copy of the SAME bytes fails", () => {
@@ -148,5 +163,21 @@ describe("golden fixture — a tampered copy of the SAME bytes fails", () => {
     expect(r.signatureOk).toBe(true);
     expect(r.events[2]!.inclusionOk).toBe(false);
     expect(r.events[2]!.ok).toBe(false);
+  });
+
+  it("a tampered disclosed content fails the event (isolated from the wrapper sig)", async () => {
+    const bundle = clone(await loadGolden());
+    const ev = (bundle.body as { events: { content?: string }[] }).events[0]!;
+    // Event 0 is the disclosed one — flip a byte of its content (still valid hex).
+    expect(typeof ev.content).toBe("string");
+    ev.content = flipLastNibble(ev.content!);
+    // Re-sign so the wrapper stays valid and the verifier REACHES the content
+    // check — isolating the disclosed-bytes lie from the wrapper signature.
+    await reSignWrapper(bundle);
+    const r = await verifyEvidenceBundle(bundle);
+    expect(r.status).toBe("failed");
+    expect(r.signatureOk).toBe(true); // wrapper authentic; the disclosed bytes lie
+    expect(r.events[0]!.contentOk).toBe(false);
+    expect(r.events[0]!.ok).toBe(false);
   });
 });
