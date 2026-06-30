@@ -82,6 +82,35 @@ result.events;       // per-event signature / payload-binding / inclusion result
 
 A withheld `record_bytes` (external commitment, record not disclosed) leaves that event's payload binding **undetermined** — surfaced, never failed (the bundle stays cryptographically sound).
 
+### …including the raw logs, when the holder discloses them
+
+The checks above prove the *stamps*. To also confirm a holder's **raw logs are the bytes whose hash was anchored**, the verifier closes the final `rawLog → content_hash` link: `SHA-256(disclosed bytes)` must equal the `content_hash` the event's record committed to.
+
+A bundle a producer built with disclosure carries the bytes **in the signed body** (`events[].content`), so they're checked automatically — no flag, and the disclosure is itself covered by the wrapper signature:
+
+```bash
+npx @ar.io/proof verify trace-bundle.json          # in-body content verified inline
+```
+
+If the logs travel **alongside** a minimal bundle instead, pass them with `--logs` — a JSON object mapping `event_id` → bytes, where an even-length lowercase-hex string is read as hex and anything else as UTF-8 text:
+
+```bash
+npx @ar.io/proof verify trace-bundle.json --logs logs.json
+```
+
+Either way each event gains a `contentOk`: **`true`** match · **`false`** mismatch (the event *and* the rollup fail, exit `1`) · **`null`** undetermined — nothing disclosed, or no committed `content_hash` (a withheld record); never a failure, mirroring the payload-binding rule. The CLI prints a `logs ✓/✗/~` mark per event and a `logs: N/M disclosed verified` line.
+
+Programmatically the same side input is `content`, keyed by `event_id` — a `Uint8Array` is used as-is, a `string` is hex:
+
+```ts
+const result = await verifyEvidenceBundle(bundle, {
+  content: { [eventId]: rawLogBytes }, // Uint8Array, or a hex string
+});
+result.events[0].contentOk; // true | false | null
+```
+
+In-body `events[].content` (signed) takes precedence over the side input; if both are present for an event and disagree, the event fails.
+
 ## Verify a Merkle inclusion proof
 
 Agents close daily checkpoints over per-cycle leaves (RFC 9162, §2.1 domain separation — not the Bitcoin duplicate-leaf variant). Verify a leaf's inclusion against an anchored root:
