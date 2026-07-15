@@ -14,13 +14,14 @@ from ario_proof.evidence import verify_evidence_bundle
 from ario_proof.rsa_pss import verify_rsa_pss_sha256
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
-_FORGERY = _ROOT / "test-vectors/evidence-export/negatives/attestation-exponent-forgery.json"
+_FORGERY = (
+    _ROOT / "test-vectors/evidence-export/negatives/attestation-exponent-forgery.json"
+)
 
 
 def _status(result: object) -> object:
-    return (
-        getattr(result, "status", None)
-        or (result.get("status") if isinstance(result, dict) else result)
+    return getattr(result, "status", None) or (
+        result.get("status") if isinstance(result, dict) else result
     )
 
 
