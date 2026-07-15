@@ -102,6 +102,36 @@ bound.contentHashOk; // true ⇔ the envelope commits to exactly these bytes
 It also ships the RFC 9162 Merkle primitives (`leafHash` / `merkleRoot` / `auditPath` /
 `verifyInclusion`) for full parity with the Python kernel. See [`ts/README.md`](ts/README.md).
 
+## CLI — verify and export
+
+The TS package ships a turnkey CLI (`npx @ar.io/proof`). Pinned exit codes: `0` verified · `1`
+failed · `2` malformed · `3` gateway-unavailable — safe to gate CI on.
+
+**Verify** any evidence or agent-proof bundle, fully offline (optionally re-fetch checkpoints
+on-chain by passing gateways; `--logs` binds disclosed raw logs to their committed hashes):
+
+```bash
+npx @ar.io/proof verify <bundle.json> [gateway1,gateway2,...] [--logs <logs.json>]
+```
+
+**Compose an attested export** (`ario.evidence.export/v1`) — turn a source trace bundle +
+operator attestation records into ONE signed, offline-verifiable artifact carrying the
+**recomputed kernel verdict** + the operators' RSA-PSS attestations. The output verifies with
+`proof verify` like any other bundle:
+
+```bash
+npx @ar.io/proof export <source-bundle.json> --attestations <att.json> --key <exporter.hex> -o export.json
+npx @ar.io/proof verify export.json   # → VERIFIED; each attestation: sig ✓  operator ✓  data_hash ✓
+```
+
+- `<source-bundle.json>` — an `ario.anchor.trace/v1` bundle from `ario.bundle()` in [`@ar.io/anchor`](https://www.npmjs.com/package/@ar.io/anchor).
+- `--attestations` — a JSON array of operator attestation records from the issuer (ar-io-verify). Each is RSA-PSS-SHA-256 (salt 32) over `JCS(payload)`; the binding fields are `payload.data_hash = SHA-256(JCS(checkpoint.envelope))` and `payload.operator = base64url(SHA-256(modulus))` (exponent MUST be 65537). An empty `[]` composes a verdict-only export.
+- `--key` — the exporter's Ed25519 wrapper-signing key (32-byte hex seed).
+
+Programmatic equivalent: `composeExport(sourceBundle, attestations, { privateKey })` from `@ar.io/proof`.
+
+> `proof export` ships in `@ar.io/proof` **0.4.0**. Spec: [`specs/evidence-export.md`](specs/evidence-export.md).
+
 ## What these kernels implement
 
 - The **Verifiable Event Envelope** family contract, `envelope-spec.md` **v1.3 (ratified
