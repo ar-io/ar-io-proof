@@ -87,6 +87,14 @@ export async function ed25519Verify(
 // does not auto-detect salt on verify. The pin is what makes these round-trip.
 const RSA_PSS_SALT_LENGTH = 32;
 
+// The ONLY RSA public exponent a legitimate operator (Arweave wallet) key uses.
+// The operator-address binding SHA-256(n) commits to the modulus ALONE and
+// assumes this exponent; a verifier MUST reject any other. Without it, e=1 makes
+// RSA verification the identity (s^1 mod n = s), letting an attacker forge a
+// valid-looking attestation from a victim operator's PUBLIC modulus with NO
+// private key. See the exponent guard in verifyRsaPssSha256.
+const RSA_PUBLIC_EXPONENT = 65537n;
+
 // Verify an RSA-PSS-SHA-256 signature over `payloadBytes` (the raw JCS bytes of
 // the attestation payload) with the JWK RSA public key `{kty:"RSA", n, e}`
 // (`n`/`e` base64url) and a lowercase-hex `signatureHex`.
@@ -108,6 +116,31 @@ export async function verifyRsaPssSha256(
     signature = hexToBytes(signatureHex);
   } catch (e) {
     throw new Error(`verifyRsaPssSha256: malformed signature hex: ${stringifyErr(e)}`);
+  }
+
+  // Enforce the RSA public exponent (see RSA_PUBLIC_EXPONENT). A structurally
+  // valid key with a non-65537 exponent is not a legitimate operator key, so
+  // its signature does not validly verify — return false (a FAILED attestation,
+  // exit 1), never accept it. A malformed `e` falls through to importKey below,
+  // which throws the malformed-key error (exit 2). This is the guard that closes
+  // the e=1 identity-forgery: e=1 imports fine in WebCrypto and would otherwise
+  // "verify" an attacker-built PSS encoded message with no private key.
+  // Decode `e`. A non-base64url `e` is malformed — importKey raises it below.
+  let eBytes: Uint8Array | null = null;
+  try {
+    eBytes = base64UrlToBytes(publicKey.e);
+  } catch {
+    eBytes = null;
+  }
+  // An empty `e` is malformed too: WebCrypto imports it as e=0 (which would
+  // return false), while the Python kernel's key import raises. Throw here so
+  // an empty exponent is malformed/exit-2 in BOTH kernels, not a divergence.
+  if (eBytes !== null && eBytes.length === 0) {
+    throw new Error("verifyRsaPssSha256: malformed RSA public key: empty exponent");
+  }
+  const exponent = eBytes === null ? null : bytesToBigInt(eBytes);
+  if (exponent !== null && exponent !== RSA_PUBLIC_EXPONENT) {
+    return false;
   }
 
   let key: CryptoKey;
@@ -176,6 +209,15 @@ function bytesToBase64Url(bytes: Uint8Array): string {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Big-endian unsigned integer from bytes — used only for the RSA public-exponent
+// guard, so alternate encodings of 65537 (e.g. with leading zero octets) still
+// compare equal.
+function bytesToBigInt(bytes: Uint8Array): bigint {
+  let v = 0n;
+  for (const b of bytes) v = (v << 8n) | BigInt(b);
+  return v;
 }
 
 function stringifyErr(e: unknown): string {

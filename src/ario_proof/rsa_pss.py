@@ -114,6 +114,29 @@ def _rsa_public_key_from_jwk(public_key: dict) -> rsa.RSAPublicKey:
         raise MalformedRsaError(f"malformed RSA public key: {exc}") from exc
 
 
+# The ONLY RSA public exponent a legitimate operator (Arweave wallet) key uses.
+# The operator-address binding SHA-256(n) commits to the modulus ALONE and
+# assumes this exponent; a verifier MUST reject any other. Without it, e=1 makes
+# RSA verification the identity — forgery from a public modulus, no private key.
+RSA_PUBLIC_EXPONENT = 65537
+
+
+def _jwk_public_exponent(public_key: object) -> int | None:
+    """The RSA public exponent from a JWK, or ``None`` if not extractable — which
+    leaves the malformed-key path to :func:`_rsa_public_key_from_jwk`."""
+    if not isinstance(public_key, dict) or not isinstance(public_key.get("e"), str):
+        return None
+    try:
+        raw = _base64url_to_bytes(public_key["e"])
+    except Exception:  # noqa: BLE001
+        return None
+    # An empty ``e`` is a MALFORMED key, not "e != 65537" — return None so it
+    # falls through to _rsa_public_key_from_jwk and keeps malformed (exit 2).
+    if len(raw) == 0:
+        return None
+    return int.from_bytes(raw, "big")
+
+
 def verify_rsa_pss_sha256(
     payload_bytes: bytes, signature_hex: str, public_key: dict
 ) -> bool:
@@ -130,6 +153,16 @@ def verify_rsa_pss_sha256(
         signature = _strict_hex_to_bytes(signature_hex)
     except MalformedRsaError as exc:
         raise MalformedRsaError(f"malformed signature hex: {exc}") from exc
+
+    # Enforce the RSA public exponent (see RSA_PUBLIC_EXPONENT). A structurally
+    # valid key with a non-65537 exponent is not a legitimate operator key, so
+    # its signature does not validly verify — return False (a FAILED attestation,
+    # exit 1). A malformed ``e`` (None) falls through to _rsa_public_key_from_jwk,
+    # which raises the malformed-key error (exit 2). Matches the TS kernel's guard
+    # and makes Python's rejection explicit rather than a library e>=3 artifact.
+    exponent = _jwk_public_exponent(public_key)
+    if exponent is not None and exponent != RSA_PUBLIC_EXPONENT:
+        return False
 
     key = _rsa_public_key_from_jwk(public_key)
 
