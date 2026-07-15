@@ -127,9 +127,14 @@ def _jwk_public_exponent(public_key: object) -> int | None:
     if not isinstance(public_key, dict) or not isinstance(public_key.get("e"), str):
         return None
     try:
-        return int.from_bytes(_base64url_to_bytes(public_key["e"]), "big")
+        raw = _base64url_to_bytes(public_key["e"])
     except Exception:  # noqa: BLE001
         return None
+    # An empty ``e`` is a MALFORMED key, not "e != 65537" — return None so it
+    # falls through to _rsa_public_key_from_jwk and keeps malformed (exit 2).
+    if len(raw) == 0:
+        return None
+    return int.from_bytes(raw, "big")
 
 
 def verify_rsa_pss_sha256(

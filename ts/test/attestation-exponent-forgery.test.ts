@@ -23,9 +23,21 @@ async function load(name: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(p, "utf8")) as Record<string, unknown>;
 }
 
+// The authoritative forgery regression lives in the cross-kernel corpus (not a
+// local fixture, which could drift from the vector both kernels verify).
+async function loadForgery(): Promise<Record<string, unknown>> {
+  const p = fileURLToPath(
+    new URL(
+      "../../test-vectors/evidence-export/negatives/attestation-exponent-forgery.json",
+      import.meta.url,
+    ),
+  );
+  return JSON.parse(await readFile(p, "utf8")) as Record<string, unknown>;
+}
+
 describe("RSA exponent guard — e=1 attestation-forgery regression (RT1)", () => {
   it("the full forged export (real operator address, e=1, no private key) verifies as FAILED", async () => {
-    const forged = await load("attestation-exponent-forgery.export.json");
+    const forged = await loadForgery();
     const r = await verifyEvidenceBundle(forged as never);
     expect(r.status).toBe("failed");
     // the forged attestation specifically does not bind (its signature is rejected)
@@ -33,7 +45,7 @@ describe("RSA exponent guard — e=1 attestation-forgery regression (RT1)", () =
   });
 
   it("verifyRsaPssSha256 rejects the forged export's e=1 attestation directly", async () => {
-    const forged = await load("attestation-exponent-forgery.export.json");
+    const forged = await loadForgery();
     const att = (forged.body as { attestations: Array<Record<string, never>> }).attestations[0]!;
     const pk = att.public_key as unknown as { kty: "RSA"; n: string; e: string };
     expect(pk.e).not.toBe("AQAB"); // it's e=1 ("AQ"), not 65537
@@ -43,6 +55,22 @@ describe("RSA exponent guard — e=1 attestation-forgery regression (RT1)", () =
       pk,
     );
     expect(ok).toBe(false);
+  });
+
+  it("an empty exponent is malformed (exit 2), not a failed verify", async () => {
+    // CodeRabbit regression: an empty `e` decodes to 0 and must be treated as a
+    // MALFORMED key (importKey throws) — not as "e != 65537" (which returns false).
+    const forged = await loadForgery();
+    const att = (forged.body as { attestations: Array<Record<string, never>> })
+      .attestations[0]!;
+    const pk = { ...(att.public_key as object), e: "" } as {
+      kty: "RSA";
+      n: string;
+      e: string;
+    };
+    await expect(
+      verifyRsaPssSha256(utf8(jcs(att.payload)), att.signature as unknown as string, pk),
+    ).rejects.toThrow(/malformed/);
   });
 
   it("regression control: the legitimate golden export (e=65537) still verifies", async () => {

@@ -125,12 +125,20 @@ export async function verifyRsaPssSha256(
   // which throws the malformed-key error (exit 2). This is the guard that closes
   // the e=1 identity-forgery: e=1 imports fine in WebCrypto and would otherwise
   // "verify" an attacker-built PSS encoded message with no private key.
-  let exponent: bigint | null;
+  // Decode `e`. A non-base64url `e` is malformed — importKey raises it below.
+  let eBytes: Uint8Array | null = null;
   try {
-    exponent = bytesToBigInt(base64UrlToBytes(publicKey.e));
+    eBytes = base64UrlToBytes(publicKey.e);
   } catch {
-    exponent = null;
+    eBytes = null;
   }
+  // An empty `e` is malformed too: WebCrypto imports it as e=0 (which would
+  // return false), while the Python kernel's key import raises. Throw here so
+  // an empty exponent is malformed/exit-2 in BOTH kernels, not a divergence.
+  if (eBytes !== null && eBytes.length === 0) {
+    throw new Error("verifyRsaPssSha256: malformed RSA public key: empty exponent");
+  }
+  const exponent = eBytes === null ? null : bytesToBigInt(eBytes);
   if (exponent !== null && exponent !== RSA_PUBLIC_EXPONENT) {
     return false;
   }
