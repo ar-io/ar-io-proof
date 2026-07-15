@@ -18,7 +18,7 @@ Verification never raises on adversarial input.
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .canonicalize import canonical_json
+from .canonicalize import MAX_CANONICAL_DEPTH, canonical_json, exceeds_depth
 from .envelope import VerificationResult, verify_envelope
 from .merkle import leaf_hash, verify_inclusion
 
@@ -65,6 +65,16 @@ def verify_proof_bundle(bundle: Any) -> BundleVerificationResult:
     """Verify an ``ario.agent.proof/v1`` inclusion-proof bundle in-process."""
     if not isinstance(bundle, dict):
         return _fail(["bundle is not a JSON object"])
+    # Bound nesting before any canonicalization (checkpoint envelope + Merkle
+    # leaves are canonicalized recursively) — a fixed shared limit keeps this a
+    # ``malformed`` verdict in every kernel. See MAX_CANONICAL_DEPTH.
+    if exceeds_depth(bundle, MAX_CANONICAL_DEPTH):
+        return _fail(
+            [
+                f"bundle nesting exceeds the {MAX_CANONICAL_DEPTH}-level "
+                "canonicalization depth bound"
+            ]
+        )
 
     spec_version = bundle.get("spec_version")
     if spec_version != BUNDLE_SPEC_VERSION:

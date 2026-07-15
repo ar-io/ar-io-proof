@@ -23,8 +23,44 @@ import type { ContentRole, Envelope, VerificationResult, VerifyOptions } from ".
 // profile-specific dialect (no underscore strip, that is mlflow-only).
 const ACCEPTED_SPEC_MAJORS = ["ario.agent/v1", "ario.events/v1"];
 
+// Maximum JSON container-nesting depth a verifier will canonicalize. Inputs
+// nested deeper are rejected as malformed BEFORE canonicalization runs. This is
+// a NORMATIVE cross-kernel invariant (envelope-spec §2 shared-invariant 7): the
+// bound must be the same fixed constant in every kernel. Without it, a
+// deeply-nested body one kernel canonicalizes on its large native stack while
+// another hits its recursion limit (CPython defaults to ~1000 frames) yields a
+// split verdict — the same bytes reported `verified`/`failed` by one kernel and
+// crash/`malformed` by another, on a depth the producer of the bytes fully
+// controls. 128 is >10x any legitimate evidence structure (which nests <15) and
+// safely under the tightest kernel recursion limit, with headroom for the JCS
+// library's own frames-per-level. Mirrors the Python kernel's MAX_CANONICAL_DEPTH.
+export const MAX_CANONICAL_DEPTH = 128;
+
+// Iteratively test whether `value` nests JSON containers deeper than `max`
+// levels; short-circuits `true` on the first over-deep path. Deliberately NOT
+// recursive: this guard runs on already-parsed, possibly-hostile input, so it
+// must never itself overflow the call stack — it walks an explicit heap stack
+// instead. The root container is depth 1; each nested array/object is one
+// deeper; scalars have no children and never increase depth.
+export function exceedsDepth(value: unknown, max: number): boolean {
+  const stack: Array<[unknown, number]> = [[value, 1]];
+  while (stack.length > 0) {
+    const [node, depth] = stack.pop()!;
+    if (node === null || typeof node !== "object") continue; // scalar — always fine
+    if (depth > max) return true; // a container nested past the bound
+    const children = Array.isArray(node) ? node : Object.values(node);
+    for (const child of children) stack.push([child, depth + 1]);
+  }
+  return false;
+}
+
 // RFC 8785 (JCS) canonicalization. The `canonicalize` package is the reference
 // JS implementation; correctness is pinned by the conformance vectors.
+//
+// Nesting is bounded FIRST (MAX_CANONICAL_DEPTH): the depth guard throws before
+// `rejectLoneSurrogates` (recursive) or `canonicalize` (recursive) ever see the
+// input, so neither can overflow, and a too-deep input is a caller/input error
+// that the callers bucket as malformed (same contract as a malformed key).
 //
 // Lone (unpaired) UTF-16 surrogates are REJECTED, never passed through: RFC
 // 8785 requires well-formed UTF-8 output, JS strings can carry lone
@@ -33,6 +69,11 @@ const ACCEPTED_SPEC_MAJORS = ["ario.agent/v1", "ario.events/v1"];
 // them). Reject-only is the one behavior all three kernels can share —
 // pinned here and by the corpus lone-surrogate negative.
 export function jcs(value: unknown): string {
+  if (exceedsDepth(value, MAX_CANONICAL_DEPTH)) {
+    throw new Error(
+      `jcs: input nesting exceeds the ${MAX_CANONICAL_DEPTH}-level canonicalization depth bound`,
+    );
+  }
   rejectLoneSurrogates(value);
   const canonical = canonicalize(value);
   if (typeof canonical !== "string") {
