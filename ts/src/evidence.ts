@@ -1013,6 +1013,86 @@ async function verifyExportBody(
   };
 }
 
+// ===========================================================================
+// Compose-side verdict recompute (evidence-export.md §5 steps 4 + 6, minus the
+// wrapper). The `proof export` composer must embed a cached `kernel_verdict`
+// (§4) whose deterministic dimensions BYTE-AGREE with what verifyExportBody will
+// later recompute over the same inline source bundle + attestation records (§5
+// step 5). Rather than reimplement that recompute, this reuses the EXACT verify
+// primitives verifyExportBody uses — verifyEvidenceBundle over the source,
+// verifyAttestation per record, then buildVerdictObject — so the composed cache
+// and the verifier's recompute cannot drift. Offline/pure: no gateways, so the
+// on-chain dimension is null (excluded from agreement anyway, §5 step 5).
+//
+// Throws on a malformed attestation record (unparseable RSA key, wrong
+// signature_alg, missing field) — a composer INPUT error the caller surfaces,
+// mirroring verifyExportBody's malformed→exit-2 for the same conditions.
+// ===========================================================================
+export interface ComposeVerdictResult {
+  // The §4 verdict object to embed as body.kernel_verdict (status/summary/as_of
+  // finalized exactly as verifyExportBody would render them).
+  verdict: VerdictObject;
+  // The recomputed inline-source-bundle status (verifyEvidenceBundle).
+  sourceStatus: EvidenceStatus;
+  // The export rollup status (§4.5 / §5 step 9) — verified | partial | failed.
+  status: EvidenceStatus;
+  // Per-attestation results (each already bound to a source checkpoint).
+  attestations: AttestationResult[];
+}
+
+export async function recomputeExportVerdict(
+  sourceBundle: EvidenceBundle,
+  attestationRecords: AttestationRecord[],
+  generatedAt: string,
+  options: VerifyEvidenceOptions = {},
+): Promise<ComposeVerdictResult> {
+  const sourceResult = await verifyEvidenceBundle(sourceBundle, options);
+
+  // Map source checkpoints by tx_id for attestation data_hash binding (§5 6c) —
+  // identical to verifyExportBody's map construction.
+  const sourceCheckpoints = new Map<string, TraceCheckpoint>();
+  const sb = sourceBundle.body as AnchorTraceBody | undefined;
+  if (sb && typeof sb === "object" && Array.isArray(sb.checkpoints)) {
+    for (const cp of sb.checkpoints) {
+      if (cp && typeof cp.tx_id === "string") sourceCheckpoints.set(cp.tx_id, cp);
+    }
+  }
+
+  const attestations: AttestationResult[] = [];
+  for (const rec of attestationRecords) {
+    const r = await verifyAttestation(rec, sourceCheckpoints);
+    if (r.malformed !== undefined) {
+      throw new Error(`attestation record is malformed: ${r.malformed}`);
+    }
+    attestations.push(r.result);
+  }
+
+  const verdict = buildVerdictObject(sourceResult, attestations);
+  verdict.as_of = generatedAt;
+
+  // Export rollup (§5 step 9). Source linkage and verdict agreement are always
+  // satisfied at compose time (the composer computes the source hash itself and
+  // there is no prior cached verdict to disagree with), so the only failure
+  // inputs here are the recomputed source status and any failed attestation.
+  const anyAttestationFailed = attestations.some((a) => !a.ok);
+  let status: EvidenceStatus;
+  if (
+    sourceResult.status === "failed" ||
+    sourceResult.status === "malformed" ||
+    anyAttestationFailed
+  ) {
+    status = "failed";
+  } else if (sourceResult.status === "partial") {
+    status = "partial";
+  } else {
+    status = "verified";
+  }
+  verdict.status = status;
+  verdict.summary = summarizeExport(status, sourceResult, attestations);
+
+  return { verdict, sourceStatus: sourceResult.status, status, attestations };
+}
+
 // Verify one embedded attestation record (§5 step 6a–d). Returns `malformed`
 // (→ exit 2) for an unparseable RSA key / signature hex or a missing required
 // field; otherwise a per-dimension AttestationResult whose `ok` gates on the

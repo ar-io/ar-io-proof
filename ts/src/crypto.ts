@@ -68,6 +68,22 @@ export async function ed25519Verify(
   }
 }
 
+// Ed25519 SIGN the raw `message` bytes with a 32-byte private-key seed (lowercase
+// hex). Returns the signature as lowercase hex. The signing counterpart to
+// ed25519Verify — the ONE signing primitive the composer (`proof export`,
+// evidence-export.md §5) needs to Ed25519-sign the export wrapper with the
+// exporter's key ("anyone can export", P-4). The @noble sha512Async hook wired at
+// module load serves signing and verification alike, so this stays WebCrypto-only.
+export async function ed25519Sign(message: Uint8Array, privateKeyHex: string): Promise<string> {
+  return bytesToHex(await ed.signAsync(message, hexToBytes(privateKeyHex)));
+}
+
+// Derive the Ed25519 public key (lowercase hex) from a 32-byte private-key seed
+// (lowercase hex) — the wrapper's embedded `public_key` when composing an export.
+export async function ed25519PublicKey(privateKeyHex: string): Promise<string> {
+  return bytesToHex(await ed.getPublicKeyAsync(hexToBytes(privateKeyHex)));
+}
+
 // ---------------------------------------------------------------------------
 // RSA-PSS operator-attestation crypto (ario.evidence.export/v1)
 //
@@ -189,8 +205,10 @@ export async function deriveOperatorAddress(nBase64url: string): Promise<string>
 
 // base64url (RFC 4648 §5, unpadded) codecs. Kept WebCrypto/browser-portable —
 // atob/btoa exist in browsers and in Node >= 16 — so the kernel stays free of
-// node:Buffer. Arweave and JWK both use unpadded base64url.
-function base64UrlToBytes(b64url: string): Uint8Array {
+// node:Buffer. Arweave and JWK both use unpadded base64url. Exported because the
+// composer transcodes an issuer-emitted base64url attestation signature to the
+// lowercase hex §2.2 stores (evidence-export.md §2.2 — the composer's boundary job).
+export function base64UrlToBytes(b64url: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]*$/.test(b64url)) {
     throw new Error("base64url: non-base64url characters");
   }
@@ -205,7 +223,7 @@ function base64UrlToBytes(b64url: string): Uint8Array {
   return out;
 }
 
-function bytesToBase64Url(bytes: Uint8Array): string {
+export function bytesToBase64Url(bytes: Uint8Array): string {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
