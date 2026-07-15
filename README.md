@@ -108,16 +108,18 @@ The TS package ships a turnkey CLI (`npx @ar.io/proof`). Pinned exit codes: `0` 
 failed · `2` malformed · `3` gateway-unavailable — safe to gate CI on.
 
 **Verify** any evidence or agent-proof bundle, fully offline (optionally re-fetch checkpoints
-on-chain by passing gateways; `--logs` binds disclosed raw logs to their committed hashes):
+on-chain by passing gateways). `--logs` binds disclosed raw logs to their committed hashes
+**for evidence bundles only** — it is ignored (with a note) for `ario.agent.proof/v1` bundles,
+which carry no per-event content:
 
 ```bash
 npx @ar.io/proof verify <bundle.json> [gateway1,gateway2,...] [--logs <logs.json>]
 ```
 
-**Compose an attested export** (`ario.evidence.export/v1`) — turn a source trace bundle +
-operator attestation records into ONE signed, offline-verifiable artifact carrying the
-**recomputed kernel verdict** + the operators' RSA-PSS attestations. The output verifies with
-`proof verify` like any other bundle:
+**Compose an attested export** — turn a source trace bundle + operator attestation records
+into ONE signed, offline-verifiable **`ario.evidence/v1`** bundle (`body_type` /
+`export_schema` = `ario.evidence.export/v1`) carrying the **recomputed kernel verdict** + the
+operators' RSA-PSS attestations. The output verifies with `proof verify` like any other bundle:
 
 ```bash
 npx @ar.io/proof export <source-bundle.json> --attestations <att.json> --key <exporter.hex> -o export.json
