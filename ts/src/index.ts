@@ -12,7 +12,16 @@
 // gateway/transport concerns are consumer-layer logic composed above it.
 
 export { contentHashes, jcs, specVersionSupported, verifyEnvelope } from "./verifier.js";
-export { bytesToHex, ed25519Verify, hexToBytes, sha256Bytes, sha256Hex, utf8 } from "./crypto.js";
+export {
+  bytesToHex,
+  deriveOperatorAddress,
+  ed25519Verify,
+  hexToBytes,
+  sha256Bytes,
+  sha256Hex,
+  utf8,
+  verifyRsaPssSha256,
+} from "./crypto.js";
 export {
   EMPTY_TREE_ROOT_HEX,
   auditPath,
