@@ -34,10 +34,16 @@ export type { ContentRole, Envelope, Subject, VerificationResult, VerifyOptions 
 
 // Evidence-bundle verification (specs/evidence-bundle.md): the signed
 // ario.evidence/v1 wrapper carrying the ario.anchor.trace/v1 body. The CLI
-// (`npx @ar.io/proof verify`) is built on this.
-export { ANCHOR_TRACE_BODY_TYPE, verifyEvidenceBundle } from "./evidence.js";
+// (`npx @ar.io/proof verify`) is built on this. The same path dispatches on the
+// issuer-composed ario.evidence.export/v1 body (specs/evidence-export.md) to
+// verifyExportBody (embedded RSA-PSS operator attestations + a recomputed §4
+// verdict object with per-gateway on-chain outcomes).
+export { ANCHOR_TRACE_BODY_TYPE, EXPORT_BODY_TYPE, verifyEvidenceBundle } from "./evidence.js";
 export type {
   AnchorTraceBody,
+  AttestationPayload,
+  AttestationRecord,
+  AttestationResult,
   CheckpointResult,
   EvidenceBundle,
   EvidenceBundleResult,
@@ -45,9 +51,20 @@ export type {
   EvidenceStatus,
   EvidenceVerdict,
   EventResult,
+  ExportBody,
+  ExportResult,
+  OnChainOutcome,
+  OnChainResult,
+  PerGatewayOutcome,
   TraceCheckpoint,
   TraceEvent,
   TraceInclusion,
+  VerdictAttestation,
+  VerdictCheckpoint,
+  VerdictEvent,
+  VerdictObject,
+  VerdictOnChain,
+  VerdictOnChainGateway,
   VerifyEvidenceOptions,
 } from "./evidence.js";
 

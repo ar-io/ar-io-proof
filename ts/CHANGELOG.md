@@ -6,6 +6,35 @@ pre-1.0, so minor versions may include behavior changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Attested-evidence-export verification (`ario.evidence.export/v1`,
+  specs/evidence-export.md §5).** `verifyEvidenceBundle` now dispatches on the
+  issuer-composed export `body_type` to a new `verifyExportBody` implementing the
+  9-step offline algorithm: wrapper `body_hash` + Ed25519 signature (existing),
+  source-bundle linkage (`SHA-256(JCS(source_bundle)) == source_bundle_hash`), a
+  recomputed source verdict (recursive `verifyEvidenceBundle` over the inline
+  source bundle), verdict agreement, embedded **RSA-PSS-SHA-256 operator
+  attestations** (reusing the slice-1 `verifyRsaPssSha256` + `deriveOperatorAddress`
+  primitives — operator-address binding `base64url(SHA-256(modulus)) ==
+  payload.operator`; `data_hash` bound to `SHA-256(JCS(checkpoint envelope))`;
+  `subject_ref` §3.2 well-formedness), and per-gateway on-chain fold-in. New
+  `EvidenceBundleResult.export?: ExportResult` (present only for an export body),
+  a recomputed §4 `VerdictObject` (snake_case, with the §4.3 `content_ok`
+  tri-state), and CLI rendering of the attested-export block. Exit codes 0/1/2/3
+  unchanged.
+- **Per-gateway on-chain outcomes (§4.2), ADDITIVE.** `CheckpointResult` gains
+  `onChain: { rollup, onChainOk, perGateway[] } | null` recording each gateway's
+  `confirm` / `mismatch` / `unreachable` outcome (worst-finding-wins rollup); the
+  collapsed `onChainOk: boolean | null` is **retained** as a derived field, so
+  existing consumers and the anchor-trace / agent-proof paths are unchanged.
+- **§5 step-5 verdict-agreement is over the DETERMINISTIC dimensions only.** The
+  cached-vs-recomputed comparison excludes the environment/time-dependent
+  on-chain per-gateway dimension (an offline verifier legitimately sees `null`),
+  so a cached on-chain observation never by itself triggers an exit-1 tamper
+  verdict; the verifier's own on-chain outcomes fold in at step 7 only if it
+  re-fetches.
+
 ## [0.3.0] — 2026-06-30
 
 ### Added
