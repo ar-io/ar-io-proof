@@ -18,6 +18,20 @@ from .envelope import (
     spec_version_supported,
     verify_envelope,
 )
+from .evidence import (
+    ACCEPTED_EVIDENCE_MAJORS,
+    ANCHOR_TRACE_BODY_TYPE,
+    EXPORT_BODY_TYPE,
+    VERDICT_SCHEMA_VERSION,
+    AttestationResult,
+    CheckpointResult,
+    EventResult,
+    EvidenceBundleResult,
+    ExportResult,
+    OnChainResult,
+    PerGatewayOutcome,
+    verify_evidence_bundle,
+)
 from .hash import sha256_hex
 from .merkle import (
     EMPTY_TREE_ROOT_HEX,
@@ -27,26 +41,47 @@ from .merkle import (
     node_hash,
     verify_inclusion,
 )
+from .rsa_pss import (
+    RSA_PSS_SALT_LENGTH,
+    MalformedRsaError,
+    derive_operator_address,
+    verify_rsa_pss_sha256,
+)
 from .sign import public_key_hex, sign, signing_key_from_seed_hex
 from .verify import verify_signature
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "__version__",
     "ACCEPTED_SPEC_VERSIONS",
+    "ACCEPTED_EVIDENCE_MAJORS",
+    "ANCHOR_TRACE_BODY_TYPE",
+    "EXPORT_BODY_TYPE",
+    "VERDICT_SCHEMA_VERSION",
     "BUNDLE_SPEC_VERSION",
     "BundleVerificationResult",
     "EMPTY_TREE_ROOT_HEX",
     "VerificationResult",
+    "AttestationResult",
+    "CheckpointResult",
+    "EventResult",
+    "EvidenceBundleResult",
+    "ExportResult",
+    "OnChainResult",
+    "PerGatewayOutcome",
+    "MalformedRsaError",
+    "RSA_PSS_SALT_LENGTH",
     "audit_path",
     "leaf_hash",
     "merkle_root",
     "node_hash",
     "verify_inclusion",
     "verify_proof_bundle",
+    "verify_evidence_bundle",
     "canonical_json",
     "content_hashes",
+    "derive_operator_address",
     "envelope_for_signature",
     "normalize_floats",
     "public_key_hex",
@@ -56,5 +91,6 @@ __all__ = [
     "signing_key_from_seed_hex",
     "spec_version_supported",
     "verify_envelope",
+    "verify_rsa_pss_sha256",
     "verify_signature",
 ]
