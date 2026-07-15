@@ -37,7 +37,7 @@ function nest(levels: number): unknown {
 describe("canonicalization depth bound (envelope-spec §2 invariant 7)", () => {
   it("the deeply-nested corpus bundle verifies as MALFORMED (not a split verdict)", async () => {
     const bundle = await loadDeepNesting();
-    const r = await verifyEvidenceBundle(bundle as never);
+    const r = await verifyEvidenceBundle(bundle);
     expect(r.status).toBe("malformed");
     expect(r.errors.some((e) => /nesting exceeds/.test(e))).toBe(true);
   });

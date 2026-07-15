@@ -13,11 +13,11 @@ from typing import Any
 import jcs
 
 __all__ = [
-    "canonical_json",
-    "normalize_floats",
-    "MAX_CANONICAL_DEPTH",
     "CanonicalDepthError",
+    "MAX_CANONICAL_DEPTH",
+    "canonical_json",
     "exceeds_depth",
+    "normalize_floats",
 ]
 
 # Maximum JSON container-nesting depth a verifier will canonicalize. Inputs
