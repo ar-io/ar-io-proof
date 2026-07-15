@@ -27,6 +27,9 @@ echo "== TS leg =="
 (cd "$repo_root/ts" && npm run --silent build >/dev/null)
 node "$here/ts_leg.mjs" "$cases"
 
+echo "== export leg (ario.evidence.export/v1, Python vs TS byte-identical verdicts) =="
+bash "$here/run_export.sh"
+
 echo "== Go leg (vendored pkg/proof @ PIN) =="
 if ! command -v go >/dev/null 2>&1; then
   echo "   go toolchain not found" >&2

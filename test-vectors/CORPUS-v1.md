@@ -1,6 +1,6 @@
-# Conformance corpus — v1.0 (+ v1.1, v1.2 additive sets)
+# Conformance corpus — v1.0 (+ v1.1, v1.2, v1.3 additive sets)
 
-> **Corpus tag: `test-vectors-v1.0`**, extended additively by **`test-vectors-v1.1`** (the `ario.events/v1` set in [§ Contents added at v1.1](#contents-added-at-v11)) and **`test-vectors-v1.2`** (the chained two-checkpoint vector + must-reject `negatives/` in [§ Contents added at v1.2](#contents-added-at-v12)). Locked at the standards ratification of 2026-06-10 per [`docs/stack/governance.md`](../docs/stack/governance.md) §4: corpus changes from here are minor bumps (`test-vectors-v1.x`); any change to the bytes of a file listed below is major (`test-vectors-v2.0`, 30-day RFC). Every conformant downstream pins a corpus tag and records which. Each minor is **purely additive** — every earlier vector is byte-unchanged, so an older pin stays valid; downstreams adopt a newer tag only to gate the vectors it adds.
+> **Corpus tag: `test-vectors-v1.0`**, extended additively by **`test-vectors-v1.1`** (the `ario.events/v1` set in [§ Contents added at v1.1](#contents-added-at-v11)), **`test-vectors-v1.2`** (the chained two-checkpoint vector + must-reject `negatives/` in [§ Contents added at v1.2](#contents-added-at-v12)), and **`test-vectors-v1.3`** (the attested-evidence-export set in [§ Contents added at v1.3](#contents-added-at-v13)). Locked at the standards ratification of 2026-06-10 per [`docs/stack/governance.md`](../docs/stack/governance.md) §4: corpus changes from here are minor bumps (`test-vectors-v1.x`); any change to the bytes of a file listed below is major (`test-vectors-v2.0`, 30-day RFC). Every conformant downstream pins a corpus tag and records which. Each minor is **purely additive** — every earlier vector is byte-unchanged, so an older pin stays valid; downstreams adopt a newer tag only to gate the vectors it adds.
 
 ## Scope
 
@@ -53,6 +53,31 @@ Two unchained event vectors (`environment` dev + production; one exercising unic
 | `negatives/negative-missing-payload-hash-00.json` | `a2818add7d61e0de56b2782e91b3a69275e3ec07b81f258aff7c65657cb999cb` |
 
 The chained vector's two checkpoints each verify full-family through `verifyEnvelope`; the negatives cover malformed `spec_version` minors (#13), a lone UTF-16 surrogate (JCS reject-only), and a missing `payload_hash` (§2). Folded into both kernels' conformance + the agent's vendored copy at this tag.
+
+## Contents added at v1.3
+
+> **Corpus tag: `test-vectors-v1.3`** — additive over v1.2 (Evidence-Labs export lane). The **attested-evidence-export vectors** (`ario.evidence.export/v1`, [`specs/evidence-export.md`](../specs/evidence-export.md)), homed in the `evidence-export/` subdirectory. This body rides the unchanged `ario.evidence/v1` Ed25519 wrapper but adds the kernel's one new primitive — **RSA-PSS-SHA-256 operator-attestation verify** (salt = 32, MGF1-SHA-256, §3.3) — plus source-bundle linkage, cached-vs-recomputed verdict agreement, and the §4 verdict object. Generated — never hand-edited — by `tools/gen-vectors/gen_export_vectors.py` from the frozen shared golden export; each tampered vector is a programmatic byte-flip / pre-signed `_tamper` swap-in / field delete, re-signed with the published Ed25519 seed where the wrapper must stay valid. The RSA-PSS operator keys are random per fixture generation but the committed golden is frozen (the RSA signatures cannot be re-derived offline, so the three RSA failure classes reuse the golden's `_tamper` block).
+
+| File | SHA-256 |
+|---|---|
+| `evidence-export/evidence-export-bundle.golden.json` | `9f93e0876ba763074254ffb74bdea70d91914fee647552fa3d1aa6b2b1f84a92` |
+| `evidence-export/rsa-pss-attestation.golden.json` | `cefac2ae0fb90216047bae77ba6552fde91fe503ab650ea51e5582c17d643c59` |
+| `evidence-export/evidence-export-positive-01.json` | `336de89bad8d10ca48ab1fc988df57ab79cd80bb201c474af63a61898dbec12f` |
+| `evidence-export/evidence-export-tamper-wrapper-signature.json` | `b987aa17a347a18fd2c9452c508e34bdf066d16d9a8a5cc7c266d06430226c2f` |
+| `evidence-export/evidence-export-tamper-body-hash.json` | `8110f53a062c08baf1ace71183afd1b22103f929c74a70b562dbc1ad93cf63d1` |
+| `evidence-export/evidence-export-tamper-source-linkage.json` | `4d1a48feef2b9e3c39b4cb255aa1bf2da535c616caa7358d55e2683d3fc53775` |
+| `evidence-export/evidence-export-tamper-verdict-disagreement.json` | `c3189ea3821af5c5bb36da4cfe453d50eac3f91873d8b9789b4b81f0b51136ed` |
+| `evidence-export/evidence-export-tamper-attestation-signature.json` | `09c5f1204e8e2f26bdf760c806948e0370bc1bfb0a39f44624ed17d2ad93872b` |
+| `evidence-export/evidence-export-tamper-mis-salt.json` | `69c2232779b615a141db4b4d932d67213c5c50dfcac4d35d42994ee4b0be188b` |
+| `evidence-export/evidence-export-tamper-operator-binding.json` | `299a48c92a023779d0bad3c0b4235603115ffe47e7169c3ecf34f7343e1d923f` |
+| `evidence-export/evidence-export-tamper-data-hash-binding.json` | `6cb353d974cc63ca2bd13c35bd2f1a1dc52ee79574781aaee95db1ce0d8ff105` |
+| `evidence-export/evidence-export-tamper-disclosed-content.json` | `482879109008e57bcd058d225c03d04c8c4623bed4c83493132769d1c902e3ef` |
+| `evidence-export/evidence-export-tamper-subject-ref.json` | `d3190c0905dd26991ff2fd2f35618cb80712796f6496210139e7eb3ef9d0a7d1` |
+| `evidence-export/evidence-export-malformed-rsa-key.json` | `3d896847d58095783b3f9d5bb6e27a7bb7bd4d698ea1a2fcd8cdbd7600bd2ea7` |
+| `evidence-export/evidence-export-malformed-signature-alg.json` | `709198452adce89506537570655aa41f67e45c0e54b8c2560c0b5753a1e132ae` |
+| `evidence-export/evidence-export-source-bundle-ref.json` | `5d552072af413faebb70cb4de2035c1940181d3d997f3b147aba21635bb7ab53` |
+
+One positive (exit 0) + thirteen negative/undetermined classes: wrapper-signature break, `body_hash` mismatch, `source_bundle_hash` mismatch, verdict disagreement, forged attestation RSA-PSS, mis-salted attestation (the salt=32 pin), operator-address-binding break, `data_hash`-binding break, disclosed-`content` mismatch, `subject_ref` tamper (all exit 1), malformed RSA key + unsupported record `signature_alg` (exit 2), and an offline `source_bundle_ref` (exit 3). The positive's `expected.verdict_jcs_sha256` is the byte-agreement anchor — the TS and Python kernels recompute the **same** JCS-canonical §4 verdict object (`738663f32ccec765743ed7d53f79b09254af2f11656e7d9955e521c4edeab8cb`). `rsa-pss-attestation.golden.json` is the bare RSA-PSS-SHA-256 primitive vector (a frozen RSA-2048 key, a snake_case attestation payload, the salt=32 signature, AND a max/auto-salt signature over the SAME payload+key so the salt pin is proven to round-trip AND to reject the un-verifiable auto-salt trap) + the `operator == base64url(SHA-256(n))` derivation. Gated Python⇄TS by `cross-kernel/run_export.sh`; the primitive is pinned in both kernels' unit suites.
 
 ## Verifying a vendored copy
 
