@@ -57,6 +57,19 @@ describe("RSA exponent guard — e=1 attestation-forgery regression (RT1)", () =
     expect(ok).toBe(false);
   });
 
+  it("rejects an EVEN exponent (e=2) as a clean FAILED, not malformed — the cross-kernel case", async () => {
+    // Even exponents are where the underlying libraries DIVERGE: pyca rejects
+    // even e at key construction ("e must be >= 3 and < n") → the Python kernel
+    // would report `malformed`, while WebCrypto imports it → the TS kernel would
+    // report a `failed` verify. The exponent guard short-circuits BOTH kernels
+    // to `false` (a clean FAILED) BEFORE key import, so e=2 agrees cross-kernel.
+    // It MUST resolve `false`, never throw — throwing is the malformed signal
+    // this guard exists to keep the kernels from diverging on. Mirrors
+    // tests/test_attestation_exponent_forgery.py::test_exponent_guard_rejects_even_e.
+    const pk = { kty: "RSA" as const, n: "sQ", e: "Ag" }; // e = 2 (even)
+    await expect(verifyRsaPssSha256(utf8("any bytes"), "00", pk)).resolves.toBe(false);
+  });
+
   it("an empty exponent is malformed (exit 2), not a failed verify", async () => {
     // CodeRabbit regression: an empty `e` decodes to 0 and must be treated as a
     // MALFORMED key (importKey throws) — not as "e != 65537" (which returns false).
