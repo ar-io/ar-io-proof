@@ -17,7 +17,7 @@ These are [`evidence-bundle.md` §1](evidence-bundle.md)'s principles, specializ
 3. **Recompute, never trust the verdict.** The embedded `kernel_verdict` (§4) is a rendering convenience. A conforming verifier MUST recompute it from the source bundle and every embedded attestation before display, and MUST treat an export whose recomputed verdict disagrees with its embedded one as **failed/tampered** — exactly as [`evidence-bundle.md` §4 step 4](evidence-bundle.md) mandates for the wrapper verdict.
 4. **No ar.io service in the trust path.** The export is self-verifying offline against embedded keys — the Ed25519 issuer key for the wrapper and the embedded RSA operator key(s) for the attestations. `gateway` values are named as the surface each attestation/checkpoint was built against, **never trusted**; on-chain re-fetch is an optional online cross-check (§4.2), not a verification dependency.
 5. **Provenance ≠ endorsement.** The verdict vocabulary is unchanged from [`evidence-bundle.md` §3](evidence-bundle.md): six states, **no "safe"/"approved"**. An operator attestation proves "this operator's key signed this `{txId, dataHash, …}` claim," never "this data is safe."
-6. **Attestation identity is out-of-band, but self-describing.** The embedded operator key binds to an Arweave wallet address by construction (`operator == base64url(SHA-256(rsa_modulus))`, §3.3), so the export proves "the holder of *this wallet* attested," offline. Binding that wallet to a *named gateway operator in the GAR* is online enrichment (§6, and an open sub-question — Appendix A3), never a verification gate in v1.
+6. **Attestation identity is out-of-band, but self-describing.** The embedded operator key binds to an Arweave wallet address by construction (`operator == base64url_nopad(SHA-256(public_key.n))`, §3.3), so the export proves "the holder of *this wallet* attested," offline. Binding that wallet to a *named gateway operator in the GAR* is online enrichment (§6, and an open sub-question — Appendix A3), never a verification gate in v1.
 
 > **This is the home for "export an attested evidence dossier."** The issuer's "compose a bundle's verification + operator attestations into one offline-verifiable, family-shaped deliverable" feature is an `ario.evidence/v1` producer — a new `body_type`, not a fourth bundle shape. It reuses the wrapper's growth hooks: `signature_alg` lets the RSA operator attestations join without minting Ed25519 keys (they ride as embedded records, not as the wrapper signature); `body_ref` (as `source_bundle_ref`, §2.4) lets a large source bundle live out-of-line behind a hash; `previous_hash` carries chain-of-custody over successive exports (§2.3).
 
@@ -65,8 +65,8 @@ The export is an `ario.evidence/v1` wrapper ([`evidence-bundle.md` §2](evidence
 | Field | Required | Type | Meaning |
 |---|---|---|---|
 | `kernel_verdict` | Yes | object | The detailed, recomputable verdict object (§4) over the source bundle + embedded attestations. **Cached rendering convenience** — the verifier recomputes it (§5 step 5) and treats a disagreement as tamper (principle 3). |
-| `source_bundle` | Cond. | object | The full source `ario.evidence/v1` bundle (`body_type` `ario.anchor.trace/v1` or another kernel-verifiable body) the export summarizes, **inline**. Exactly one of `source_bundle` / `source_bundle_ref` MUST be present. Inline is REQUIRED for a self-contained offline export (§5). |
-| `source_bundle_ref` | Cond. | string (URI) | Out-of-line source-bundle location, for a source too large to inline. Integrity is `source_bundle_hash`. An export using `source_bundle_ref` is **not** verifiable on a network-isolated machine unless the referenced bytes are co-delivered (§5, exit 3). |
+| `source_bundle` | Cond. | object | The full source `ario.evidence/v1` bundle the export summarizes, **inline**. In v1 this MUST be an `ario.anchor.trace/v1` bundle — the only source `body_type` the kernel verifies (§2.4); other kernel-verifiable body types are a defined growth hook, out of v1 scope. Exactly one of `source_bundle` / `source_bundle_ref` MUST be present. Inline is REQUIRED for a self-contained offline export (§5). |
+| `source_bundle_ref` | Cond. | string (URI) | Out-of-line source-bundle location, for a source too large to inline — a defined growth hook, **out of v1 scope** (§2.4). Integrity is `source_bundle_hash`. An export using `source_bundle_ref` is **not** verifiable on a network-isolated machine unless the referenced bytes are co-delivered; the v1 offline verifier does **not** auto-fetch it (§2.4 / §5 step 3, exit 3). |
 | `source_bundle_hash` | Yes | sha256-hex | **Inline:** `SHA-256(JCS(source_bundle))`. **Referenced:** SHA-256 of the published bytes exactly as fetched (no re-canonicalization), mirroring the wrapper's `body_hash` rule ([`evidence-bundle.md` §2](evidence-bundle.md)). This is the source-bundle **linkage commitment** (§5 step 4). |
 | `attestations` | Yes | array | Embedded operator attestation records (§3), one or more per source checkpoint. MAY be empty only for a content-blind / attestation-less export, in which case every checkpoint's attestation dimension is `undetermined`, never `verified`. |
 | `attestations[].checkpoint_tx_id` | Yes | string | The source-bundle `checkpoints[].tx_id` this attestation binds to. A verifier MUST resolve it to a present checkpoint (§5 step 6). |
@@ -84,6 +84,10 @@ Chain-of-custody over successive exports rides the **wrapper** `previous_hash` (
 
 The source bundle is a complete, independently kernel-verifiable `ario.evidence/v1` bundle. The export does **not** re-canonicalize or rewrite it (principle 2). Default is inline (`source_bundle`) for a self-contained file; `source_bundle_ref` + `source_bundle_hash` is the growth hook for a source too large to inline, mirroring the wrapper `body`/`body_ref` split. Either way `source_bundle_hash` is the integrity commitment the export signature covers (it is inside `body`, hence inside `body_hash`, hence inside the wrapper signature).
 
+**v1 scope (pinned once).** v1 supports exactly **one source shape: an inline `ario.anchor.trace/v1` bundle** (`source_bundle`). Other source `body_type`s and out-of-line `source_bundle_ref` are **defined growth hooks, out of v1 scope** — the v1 kernel fully verifies only the inline anchor-trace source (an unrecognized inline source body yields an *undetermined* source verdict at §5 step 4, and its embedded attestations resolve no checkpoint, so the export cannot reach `verified`). This is the single authoritative statement of source-body support; §2.2, §3, and [`evidence-bundle.md` §5](evidence-bundle.md)'s registration all refer here.
+
+**`source_bundle_ref` and SSRF (offline-first).** A v1 offline verifier **MUST NOT** auto-fetch `source_bundle_ref`: the referenced bytes must be co-delivered as a side input, and their absence makes the source-dependent checks **undetermined → exit 3** (never a failure) — this is exactly what the reference kernels do (the source-dependent checks short-circuit to *undetermined* when the source is not inline; see §5 step 3). A deployment that *does* choose to fetch a `source_bundle_ref` (an out-of-v1 growth path) **MUST** treat the URI as untrusted input and defend against SSRF: restrict to safe schemes (e.g. `https:`/`local:`, never `file:`/`gopher:`/raw IP metadata endpoints), bound and vet redirects and destination hosts (deny-list link-local / RFC 1918 / loopback unless explicitly allowed), enforce connect/read timeouts and a response-size cap, and hash the **exact bytes received** against `source_bundle_hash` (SHA-256 of the fetched bytes as-is, no re-canonicalization — the referenced-body rule of §2.2). A hash mismatch is a hard failure (§5 step 3, exit 1); a fetch that cannot complete under these bounds is undetermined (exit 3), not a pass.
+
 ## 3. Embedded attestation records
 
 An attestation record is a **portable, JCS-canonicalized, RSA-PSS-signed** claim by a gateway operator about one Arweave transaction. It is the ar-io-verify `/attestation` payload, migrated onto the family canon (§3.4) and carrying the new optional `subject_ref` (§3.2).
@@ -100,7 +104,7 @@ The payload is a flat JSON object. Field names are the family `snake_case` form;
   "data_size": 10485760,
   "block_height": 1512345,
   "block_timestamp": 1789000000,
-  "operator": "<Arweave wallet address = base64url(SHA-256(rsa_modulus))>",
+  "operator": "<Arweave wallet address = base64url_nopad(SHA-256(public_key.n)), §3.3>",
   "owner_address": "<Arweave tx owner address>",
   "gateway": "https://operator-gateway.example",
   "signature_verified": true,
@@ -121,7 +125,7 @@ The payload is a flat JSON object. Field names are the family `snake_case` form;
 | `data_size` | Yes | int | Byte length of the attested data. |
 | `block_height` | Yes | int | The block the tx is included in. |
 | `block_timestamp` | Yes | int | Witnessed block time (Unix seconds). The non-forgeable time. |
-| `operator` | Yes | string | The operator's Arweave wallet address. MUST equal `base64url(SHA-256(rsa_modulus))` of the record's `public_key` (§3.3) — this binds the signature to the wallet. |
+| `operator` | Yes | string | The operator's Arweave wallet address. MUST equal `base64url_nopad(SHA-256(public_key.n))` derived from the record's `public_key` (byte rule pinned in §3.3) — this binds the signature to the wallet. |
 | `owner_address` | Yes | string | The tx owner's Arweave address (the data's uploader). Distinct from `operator`. |
 | `gateway` | Yes | string | The gateway surface the operator observed the tx on. **Named, not trusted.** |
 | `signature_verified` | Yes | bool | Whether the operator verified the tx's own data-item signature. Feeds the attestation `level`. |
@@ -129,14 +133,14 @@ The payload is a flat JSON object. Field names are the family `snake_case` form;
 | `subject_ref` | **No** | object | **D8, additive.** `{ hash: sha256-hex, type: string }` — a hash + type of an external subject the attestation is *about* (an AP2 mandate, an MLflow run, a document). Absent ⇒ the attestation is unbound to any external subject (backward-compatible). §3.2. |
 | `attestation_version` | No | string | Body-internal self-identifier for the payload schema. Harmless; the record `signature_alg` + this doc are authoritative. |
 
-The record's `public_key`, `signature_alg`, and `signature` (§2.2) are **not** part of the signed payload — the signature is over `JCS(payload)` only, exactly as the issuer signs `signPayload(buildAttestationPayload(...))` today.
+The record's `public_key`, `signature_alg`, and `signature` (§2.2) are **not** part of the signed payload — the signature is over `JCS(payload)` only. This is the **post-migration** signing form required by this spec (§3.4): RFC 8785 `JCS(payload)` with the `snake_case` field names above, signed RSA-PSS-SHA-256 with a 32-byte (digest-length) salt (§3.3). It is **not** the shipped issuer's current `signPayload(buildAttestationPayload(...))` behavior — that signs a custom deep-sorted-key canon over `camelCase` fields with `RSA_PSS_SALTLEN_AUTO`, which §3.4 replaces. A verifier that follows this spec verifies only records signed in the post-migration form.
 
 ### 3.2 `subject_ref` (D8)
 
 `subject_ref` is **additive and optional**. It lets an attestation point at an external subject by hash + type without disclosing the subject's bytes — e.g. an AP2 payment mandate, an MLflow run record, a contract document. Semantics:
 
 - Absent ⇒ the attestation binds only to the on-chain tx (`tx_id` / `data_hash`); it makes no external-subject claim. Every pre-D8 attestation is valid unchanged.
-- Present ⇒ `hash` is `SHA-256` of the external subject's canonical bytes and `type` is a caller-declared subject-type token (`^[a-z0-9.:-]+$`). The verifier confirms the field is **well-formed** and that it is inside the signed payload (so it cannot be added or altered after signing); it does **not** fetch or re-hash the external subject (that binding is out-of-band, the subject bytes are the relying party's to supply). A verifier MAY accept a supplied side-input subject file and confirm `SHA-256(subject) == subject_ref.hash`, surfacing the result — but a *missing* side input leaves `subject_ref` **undetermined, not failed** (mirrors disclosed-content handling, [`evidence-bundle.md` §5.1](evidence-bundle.md)). A `subject_ref` present but malformed (bad `hash`/`type` shape) is likewise `subject_ref_ok: null` — surfaced, non-gating; §5 step 6 gates only on signature, operator-address, and `data_hash` binding.
+- Present ⇒ `hash` is a lowercase `sha256-hex` and `type` is a caller-declared subject-type token (`^[a-z0-9.:-]+$`). **Pinned hashed bytes:** `subject_ref.hash` is `SHA-256` over the **exact raw bytes the relying party supplies as the subject** — the verifier hashes those bytes as-is and does **not** re-canonicalize them (any canonicalization of the subject is the *producer's* out-of-band responsibility, done before hashing; the verifier neither knows nor re-applies it). The verifier confirms the field is **well-formed** and that it is inside the signed payload (so it cannot be added or altered after signing); it does **not** fetch the external subject (that binding is out-of-band, the subject bytes are the relying party's to supply). A verifier MAY accept a supplied side-input subject file and confirm `SHA-256(raw supplied bytes) == subject_ref.hash`, surfacing the result — but a *missing* side input leaves `subject_ref` **undetermined, not failed** (mirrors disclosed-content handling, [`evidence-bundle.md` §5.1](evidence-bundle.md)). A `subject_ref` present but malformed (bad `hash`/`type` shape) is likewise `subject_ref_ok: null` — surfaced, non-gating; §5 step 6 gates only on signature, operator-address, and `data_hash` binding.
 
 ### 3.3 Canonicalization & signing (issuer)
 
@@ -150,7 +154,7 @@ Identical discipline to the wrapper ([`evidence-bundle.md` §4](evidence-bundle.
 
 **RSA-PSS parameters (pinned — cross-kernel byte-agreement depends on this):** hash = SHA-256; MGF1 with SHA-256; **salt length = digest length (32 bytes)** (`RSA_PSS_SALTLEN_DIGEST`); padding = PSS. These MUST be identical in the issuer, the TS kernel, and the Python kernel. **Resolved 2026-07-15 (against ar-io-verify `packages/server/src/utils/signing.ts`):** the shipped issuer signs attestations with `RSA_PSS_SALTLEN_AUTO`, which on *signing* resolves to the maximum (key-size-dependent) salt — not verifiable by WebCrypto or Python `cryptography`, neither of which auto-detects salt on verify. Because the JCS migration (§3.4) re-signs every attestation regardless, the issuer MUST switch to an explicit `RSA_PSS_SALTLEN_DIGEST` (32-byte) salt in the same change, matching this pin; WebCrypto (`saltLength: 32`) and Python (`salt_length = 32`) then verify natively. This is a migration action, not a value to read off the current default.
 
-**Operator-address binding.** `operator = base64url(SHA-256(rsa_modulus_n))`. The kernel recomputes this from the embedded `public_key.n` and MUST reject the record if it does not equal `payload.operator` — this is what makes the embedded key self-describing (principle 6): the signature is bound to a specific Arweave wallet with no roster lookup.
+**Operator-address binding (pinned — cross-kernel byte-agreement depends on this).** `operator = base64url_nopad(SHA-256(M))`, where **M** is the base64url-decoded octet string of the record's `public_key.n` — the RSA modulus as an unsigned big-endian integer, **used exactly as decoded: no leading-zero octet is stripped or added, and the bytes are not re-padded to the key/modulus size.** `SHA-256(M)` is hashed over those raw octets directly, and `base64url_nopad` is RFC 4648 §5 base64url with trailing `=` padding removed (the Arweave wallet-address form). The kernel derives this from the embedded `public_key.n` and MUST reject the record if it does not equal `payload.operator` — this is what makes the embedded key self-describing (principle 6): the signature is bound to a specific Arweave wallet with no roster lookup. Both reference kernels implement exactly this (`deriveOperatorAddress` in `crypto.ts` — `bytesToBase64Url(SHA-256(base64UrlToBytes(n)))`; `derive_operator_address` in `rsa_pss.py` — `base64url(hashlib.sha256(base64url_decode(n)).digest())`); a third kernel MUST hash the decoded `n` octets as-is, since any leading-zero normalization would change the address.
 
 ### 3.4 Migration note — breaking change for ar-io-verify
 
@@ -249,7 +253,7 @@ The single `on_chain_ok: boolean|null` per checkpoint is **replaced** by a per-g
   "$id": "https://ar.io/specs/ario.evidence.verdict/v1.json",
   "title": "ario.evidence verdict object v1",
   "type": "object",
-  "required": ["schema_version", "status", "events", "checkpoints"],
+  "required": ["schema_version", "status", "counts", "events", "checkpoints"],
   "additionalProperties": false,
   "properties": {
     "schema_version": { "const": "ario.evidence.verdict/v1" },
@@ -257,6 +261,7 @@ The single `on_chain_ok: boolean|null` per checkpoint is **replaced** by a per-g
     "summary": { "type": "string" },
     "counts": {
       "type": "object",
+      "required": ["verified", "failed", "undetermined"],
       "additionalProperties": false,
       "properties": {
         "verified": { "type": "integer", "minimum": 0 },
@@ -336,16 +341,47 @@ The single `on_chain_ok: boolean|null` per checkpoint is **replaced** by a per-g
 }
 ```
 
+### 4.5 Deterministic verdict rollup (cross-kernel critical)
+
+The verdict object's derived fields — every per-event `status`, the `counts`, and the top-level `status` — are **deterministic functions of the recomputed dimensions**, pinned here so an independent kernel derives byte-identical rollups. Both reference kernels implement exactly these rules (TS `buildVerdictObject` / `verifyExportBody`; Python `_build_verdict_object` / `_verify_export_body`); the implementations agree and are authoritative.
+
+**Per-event `status`** (`events[].status`). Call an event *gate-passing* iff `signature_ok` (its envelope Ed25519 signature verified) **and** `inclusion_ok` (RFC 9162 inclusion reconstructed its checkpoint root) **and** it bound to a present checkpoint **and** `content_ok !== false` (a disclosed-content **mismatch** is the only content state that fails the gate; `null` and `true` do not). Then:
+
+- `failed` — not gate-passing.
+- `partial` — gate-passing **and** `payload_bound == null` (the committed record was withheld: signature-valid, semantics-undetermined).
+- `verified` — gate-passing **and** `payload_bound != null`.
+
+The per-event enum the impl emits is **exactly `{verified, partial, failed}`** — **never `mixed`, `pending`, or `not_found`.** (`mixed` is a batch/collection-level family state, not a per-event value; the §4.4 schema's per-event `status` enum is a forward-compatible superset, but a v1 export emits only those three.)
+
+**Per-attestation pass/fail.** An embedded attestation *passes* iff `signature_ok` (RSA-PSS-SHA-256 over `JCS(payload)`, §3.3) **and** `operator_address_bound` (§3.3) **and** `data_hash_bound` (§5 step 6c — which also implies its `checkpoint_tx_id` resolved to a present source checkpoint: an unresolved checkpoint leaves `data_hash_bound` false, so the three visible dimensions fully determine the outcome). **`subject_ref_ok` is NOT a gate** (§3.2): a `null` or well-formed-but-unchecked `subject_ref` never changes an attestation's pass/fail. There is **no separate per-checkpoint attestation status field**: attestations are grouped under `checkpoints[].attestations[]` by `checkpoint_tx_id` and feed `counts` and the export `status` directly, not a per-checkpoint rollup value.
+
+**`counts`** (always emitted; three integer members, each ≥ 0). Tallies **events and attestations only** — checkpoints and the on-chain dimension are not counted here:
+
+- each event, by its per-event `status`: `verified` → `verified++`, `partial` → `undetermined++`, `failed` → `failed++`;
+- each attestation: pass → `verified++`, fail → `failed++` (an attestation is only ever `verified` or `failed`, never `undetermined`).
+
+Because the impl always emits `counts` with all three members, the §4.4 schema requires them (and `counts` itself) — a conforming kernel MUST emit all three.
+
+**Top-level / export `status`** (the verdict object's `status`, which drives the CLI exit). Derived **after all recomputation** (source verdict at §5 step 4 *and* the embedded attestations at §5 step 6 — see the §5 step-5 ordering note):
+
+- `failed` — the source-bundle linkage broke (`source_bundle_hash` mismatch), the deterministic verdict agreement broke (§5 step 5), the recomputed **source** status is `failed` or `malformed`, **or** any embedded attestation failed.
+- `partial` — none of the above **and** the recomputed source status is `partial` (a withheld record → still exit 0; an all-`unreachable` on-chain checkpoint → exit 3, keyed off the propagated `unreachable` note).
+- `verified` — otherwise.
+
+A v1 export therefore emits a top-level `status` of **exactly `{verified, partial, failed}`** (never `pending`/`not_found`/`mixed`). A **structurally unrenderable** export (missing required body field, unparseable RSA key, unsupported per-record `signature_alg`) is a distinct **result-level `malformed`** that carries **no** verdict object and maps to **exit 2** — it is not one of the verdict `status` values.
+
+**Exit-code mapping** (the full table is §5 step 9): `verified`, or `partial` from a withheld record → **0**; `failed` → **1**; result-level `malformed` → **2**; `partial` whose only shortfall is an unreachable gateway or an offline-unavailable `source_bundle_ref` → **3**.
+
 ## 5. Offline verification algorithm
 
 The algorithm a kernel runs on `proof verify <export>` — self-contained offline when the source bundle is inline (§2.2). It composes the existing single-envelope + Merkle kernel primitives ([`architecture.md` §8](architecture.md)) plus the one new primitive (RSA-PSS record verify, §7). Steps are ordered so nothing is trusted before the wrapper signature is checked.
 
 1. **Parse & dispatch.** Parse the wrapper. Reject an unknown `spec_version` **major** → exit 2. Confirm `body_type == ario.evidence.export/v1`; an unrecognized `body_type` is not this algorithm (the kernel's generic wrapper handler yields `partial`, [`evidence-bundle.md`](evidence-bundle.md)).
 2. **Wrapper integrity + signature.** Recompute `SHA-256(JCS(body))`; reject on mismatch vs `body_hash`. Confirm wrapper `signature_alg == ed25519`. Strip `signature`, `JCS`, verify Ed25519 against `public_key`. Any failure here → **exit 1** (the export is tampered or not issuer-signed). *No new crypto — the shipped kernel does this today.*
-3. **Source-bundle linkage.** If inline: recompute `SHA-256(JCS(source_bundle))` and reject on mismatch vs `source_bundle_hash`. If `source_bundle_ref`: fetch, hash, compare — and if the bytes are unavailable offline, the source-dependent checks (steps 4–5) are `undetermined` → **exit 3** (not a failure). A mismatch is → **exit 1**.
+3. **Source-bundle linkage.** If inline: recompute `SHA-256(JCS(source_bundle))` and reject on mismatch vs `source_bundle_hash`. If `source_bundle_ref` (out of v1 scope, §2.4): the v1 offline verifier **does NOT auto-fetch** it — the referenced bytes must be co-delivered as a side input. When they are absent, the source-dependent checks (steps 4–6) are `undetermined` → **exit 3** (not a failure). When co-delivered (or when an out-of-v1 deployment fetches under the SSRF bounds of §2.4), hash the **exact received bytes** and compare to `source_bundle_hash`; a mismatch → **exit 1**.
 4. **Recompute the source verdict.** Run the existing `verifyEvidenceBundle` path over `source_bundle`: for each event, Ed25519 envelope signature + `payload_hash` binding + RFC 9162 inclusion against its checkpoint's Merkle root; for each checkpoint, committed-root recompute; per-event `content_ok` (§4.3); optional on-chain per-gateway re-fetch (§4.2). This yields a fresh verdict object (§4).
-5. **Verdict agreement.** Compare the freshly recomputed verdict to the export's cached `body.kernel_verdict` **over the deterministic, offline-recomputable dimensions only** — per-event `signature_ok` / `payload_bound` / `inclusion_ok` / `content_ok`, per-checkpoint `merkle_root_ok`, and per-attestation `signature_ok` / `operator_address_bound` / `data_hash_bound` / `subject_ref_ok` — with `event_id` / `operator` retained only as identity anchors to align list items. A disagreement on those → **exit 1** (recompute-don't-trust, principle 3). **Every other field is EXCLUDED** from the comparison — `status`, `counts`, `summary`, `as_of`, `custody_chain`, the per-attestation `level` / `gateway`, and (load-bearing) the entire **on-chain per-gateway block (§4.2)**: the issuer records it online at compose time, but an offline verifier does no re-fetch and legitimately recomputes it as `null`, so comparing it would fail every honest offline export — the verifier's own on-chain outcomes fold in only at step 7. The displayed verdict is always the recomputed one.
-6. **Embedded attestation records.** For each `body.attestations[]` record: (a) verify the **RSA-PSS-SHA-256** signature over `JCS(payload)` against the embedded `public_key` with the pinned parameters (§3.3) — *new primitive*; (b) recompute `base64url(SHA-256(public_key.n))` and confirm it equals `payload.operator` (operator-address binding); (c) resolve `checkpoint_tx_id` to a present source checkpoint and confirm `payload.data_hash` equals `SHA-256(JCS(checkpoint.envelope))` for that checkpoint (`data_hash_bound`, §3.1); (d) if `payload.subject_ref` is present, confirm it is well-formed and (given a side-input subject) that `SHA-256(subject) == subject_ref.hash`, else `subject_ref_ok = null` — a present-but-malformed or side-input-absent `subject_ref` yields `subject_ref_ok = null` (surfaced, non-gating), never an exit-1 trigger. A broken RSA-PSS signature, a failed operator-address binding, or a `data_hash` that does not bind → **exit 1**.
+5. **Verdict agreement.** *(Ordering: although numbered 5, this comparison runs **after** the embedded attestations are verified — step 6 below — because the freshly recomputed verdict it compares includes the per-attestation dimensions. The verifier recomputes the full §4 verdict object first (the source dimensions from step 4 **and** every attestation from step 6, §4.5), then performs this agreement check; both reference kernels compute attestations, build the verdict, then compare, in that order.)* Compare the freshly recomputed verdict to the export's cached `body.kernel_verdict` **over the deterministic, offline-recomputable dimensions only** — per-event `signature_ok` / `payload_bound` / `inclusion_ok` / `content_ok`, per-checkpoint `merkle_root_ok`, and per-attestation `signature_ok` / `operator_address_bound` / `data_hash_bound` / `subject_ref_ok` — with `event_id` / `operator` retained only as identity anchors to align list items. A disagreement on those → **exit 1** (recompute-don't-trust, principle 3). **Every other field is EXCLUDED** from the comparison — `status`, `counts`, `summary`, `as_of`, `custody_chain`, the per-attestation `level` / `gateway`, and (load-bearing) the entire **on-chain per-gateway block (§4.2)**: the issuer records it online at compose time, but an offline verifier does no re-fetch and legitimately recomputes it as `null`, so comparing it would fail every honest offline export — the verifier's own on-chain outcomes fold in only at step 7. The displayed verdict is always the recomputed one.
+6. **Embedded attestation records.** For each `body.attestations[]` record: (a) verify the **RSA-PSS-SHA-256** signature over `JCS(payload)` against the embedded `public_key` with the pinned parameters (§3.3) — *new primitive*; (b) recompute `base64url_nopad(SHA-256(public_key.n))` (over the exact decoded modulus octets, §3.3) and confirm it equals `payload.operator` (operator-address binding); (c) resolve `checkpoint_tx_id` to a present source checkpoint and confirm `payload.data_hash` equals `SHA-256(JCS(checkpoint.envelope))` for that checkpoint (`data_hash_bound`, §3.1); (d) if `payload.subject_ref` is present, confirm it is well-formed and (given a side-input subject) that `SHA-256(raw supplied subject bytes) == subject_ref.hash` (§3.2 — hashed as-is, no re-canonicalization), else `subject_ref_ok = null` — a present-but-malformed or side-input-absent `subject_ref` yields `subject_ref_ok = null` (surfaced, non-gating), never an exit-1 trigger. A broken RSA-PSS signature, a failed operator-address binding, or a `data_hash` that does not bind → **exit 1**.
 7. **Fold in per-gateway on-chain outcomes.** Merge step 4's per-gateway outcomes (§4.2) into the verdict. Any checkpoint `mismatch` → **exit 1**. A checkpoint whose on-chain dimension is only `unreachable` (all gateways) contributes `undetermined`.
 8. **Custody chain (optional).** If prior export(s) were supplied, verify the `previous_hash` link(s) (§2.3); a broken link → **exit 1**. Absent inputs → `custody_chain = null` (not a failure).
 9. **Exit code.** Map the rollup:
@@ -365,7 +401,7 @@ Net-new work per language kernel (Ed25519 wrapper handling and the envelope/Merk
 
 **TS (`@ar.io/proof`):**
 - `ario.evidence.export/v1` `body_type` dispatch → a `verifyExportBody` (today `evidence.ts` dispatches only the anchor-trace body; an unknown body_type falls through to `partial`).
-- An **RSA-PSS-SHA-256 verify primitive** (`crypto.ts` is Ed25519-only). Via WebCrypto `RSASSA-PSS` with the pinned salt length (§3.3). New crypto surface + operator-address derivation (`base64url(SHA-256(n))`).
+- An **RSA-PSS-SHA-256 verify primitive** (`crypto.ts` is Ed25519-only). Via WebCrypto `RSASSA-PSS` with the pinned salt length (§3.3). New crypto surface + operator-address derivation (`base64url_nopad(SHA-256(public_key.n))`, §3.3).
 - Reuse the existing JCS canonicalizer for the attestation records (no new canon).
 - **Per-gateway on-chain outcomes:** replace the single `onChainOk` in the checkpoint result with the `on_chain.per_gateway[]` array (§4.2) and the derived collapsed field — in both the anchor-trace path and the agent-proof path — and update the rollup / CLI render.
 - Extend the CLI/verify result to emit the §4 verdict object (with `content_ok` tri-state and per-gateway outcomes) for exports.
@@ -392,11 +428,11 @@ Every consumer MUST hold these (they extend [`evidence-bundle.md` §6](evidence-
 
 ## 7. Governance, corpus & backward-compatibility
 
-### 7.1 Where this rides governance — recommendation
+### 7.1 Where this rides governance — the decision
 
-**Recommendation: a new spec file, `evidence-export.md`, in `ar-io-proof/specs/`, registered as an additive minor.** Concretely, ratification lands three things in one PR ([`governance.md` §2](governance.md), additive = minor, no 30-day RFC):
+**Decided: a new spec file, `evidence-export.md`, in `ar-io-proof/specs/`, registered as an additive minor.** The new-file-vs-inline question is settled (rationale below); this is not an open recommendation. Ratification lands three things in one PR (#19) ([`governance.md` §2](governance.md), additive = minor, no 30-day RFC):
 
-1. This file, `evidence-export.md`, at status `ratified`.
+1. This file, `evidence-export.md`, at status `ratified` (BDFL-ratified 2026-07-15; RFC-2119 keywords binding on merge).
 2. A one-row add to [`evidence-bundle.md` §5](evidence-bundle.md)'s per-producer table registering `body_type` `ario.evidence.export/v1` (issuer, `signature_alg` `ed25519` wrapper / embedded `rsa-pss-sha256` records), pointing to this file as the authoritative spec — exactly the shape of the `ario.anchor.trace/v1` registration.
 3. A [`governance.md` §7](governance.md) amendment-log row.
 
@@ -404,12 +440,12 @@ Every consumer MUST hold these (they extend [`evidence-bundle.md` §6](evidence-
 
 ### 7.2 Corpus implications
 
-A **corpus minor bump `test-vectors-v1.2` → `test-vectors-v1.3`** ([`governance.md` §4](governance.md); generated, never hand-edited, CORP1). New **signed-export vectors**:
+A **corpus minor bump `test-vectors-v1.2` → `test-vectors-v1.3`** is **planned to land with the kernel/corpus PR (#21), not this spec PR (#19).** The vectors and their `CORPUS-v1.md` manifest are generated conformance artifacts ([`governance.md` §4](governance.md); generated, never hand-edited, CORP1), so they land alongside the kernel that generates and gates them — #19 *declares and plans* the bump; #21 *commits* it. The planned **signed-export vectors**:
 
 - **One positive:** kernel verdict + inline source anchor-trace bundle + ≥2 embedded RSA-PSS operator attestations + `previous_hash` custody + per-gateway on-chain outcomes (a `confirm`/`unreachable` mix) + one disclosed-raw-log event (`content_ok = true`) + one `subject_ref`.
 - **One tampered vector per failure class:** wrapper-signature break, `body_hash` mismatch, `source_bundle_hash` mismatch, verdict disagreement, forged attestation RSA-PSS, operator-address-binding break, checkpoint on-chain `mismatch`, disclosed-`content` mismatch, `subject_ref` tamper.
 
-The cross-kernel harness (`generate_cases.py` / `run.sh`) extends to drive `verifyEvidenceBundle`/export across **TS + Python** (Go later, P1) and assert **byte-for-byte identical verdicts** — the gate that forces the Python evidence verifier (§5.1) into existence and pins the RSA-PSS salt-length seam. Every conformant downstream re-pins `test-vectors-v1.3` as its own explicit act (K3); `test-vectors-v1.2` remains valid for consumers that do not need exports.
+The cross-kernel harness (`generate_cases.py` / `run.sh`) extends to drive `verifyEvidenceBundle`/export across **TS + Python** (Go later, P1) and assert **byte-for-byte identical verdicts** — the gate that forces the Python evidence verifier (§5.1) into existence and pins the RSA-PSS salt-length seam. That harness extension ships with the same corpus/kernel PR (#21). Once it lands, every conformant downstream re-pins `test-vectors-v1.3` as its own explicit act (K3); `test-vectors-v1.2` remains valid for consumers that do not need exports.
 
 ### 7.3 Backward-compatibility statement
 
@@ -442,7 +478,7 @@ The cross-kernel harness (`generate_cases.py` / `run.sh`) extends to drive `veri
 
 ---
 
-*Draft (2026-07-15) implementing the BDFL-ratified OQ-1+D8 shape. Ratify per [`governance.md`](governance.md) §2 (additive = minor); revisit when the issuer's attestation schema or the source-bundle body changes.*
+*BDFL-ratified 2026-07-15 (Phil Mataras, per [`governance.md`](governance.md) §1), implementing the OQ-1+D8 shape; landing via PR #19 to `ar-io-proof/specs` as an additive minor (§2), RFC-2119 keywords binding on merge. Revisit when the issuer's attestation schema or the source-bundle body changes.*
 
 ---
 
