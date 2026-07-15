@@ -38,13 +38,19 @@ export type { ContentRole, Envelope, Subject, VerificationResult, VerifyOptions 
 // issuer-composed ario.evidence.export/v1 body (specs/evidence-export.md) to
 // verifyExportBody (embedded RSA-PSS operator attestations + a recomputed §4
 // verdict object with per-gateway on-chain outcomes).
-export { ANCHOR_TRACE_BODY_TYPE, EXPORT_BODY_TYPE, verifyEvidenceBundle } from "./evidence.js";
+export {
+  ANCHOR_TRACE_BODY_TYPE,
+  EXPORT_BODY_TYPE,
+  recomputeExportVerdict,
+  verifyEvidenceBundle,
+} from "./evidence.js";
 export type {
   AnchorTraceBody,
   AttestationPayload,
   AttestationRecord,
   AttestationResult,
   CheckpointResult,
+  ComposeVerdictResult,
   EvidenceBundle,
   EvidenceBundleResult,
   EvidenceIssuer,
@@ -67,6 +73,13 @@ export type {
   VerdictOnChainGateway,
   VerifyEvidenceOptions,
 } from "./evidence.js";
+
+// The `proof export` composer (specs/evidence-export.md §5, phase 2): produce a
+// signed, offline-verifiable ario.evidence.export/v1 artifact from a source
+// anchor-trace bundle + operator attestations + an exporter Ed25519 key. The
+// inverse of verifyEvidenceBundle's verifyExportBody dispatch.
+export { attestationSignatureToHex, composeExport } from "./compose.js";
+export type { ComposeExportOptions, ComposeExportResult, ExporterKey } from "./compose.js";
 
 // Agent inclusion-proof bundle verification (ar-io-agent artifact.md §10): the
 // ario.agent.proof/v1 bundle. The CLI sniffs spec_version and routes here so

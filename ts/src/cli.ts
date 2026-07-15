@@ -14,15 +14,17 @@
 // `payloadHashOk === null` (a withheld record) is semantics-undetermined and
 // surfaces as a per-event note — it does NOT fail the run.
 
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { isAgentProofSpec, verifyAgentProofBundle } from "./agent-proof.js";
 import type { AgentProofResult } from "./agent-proof.js";
+import { composeExport } from "./compose.js";
+import type { ComposeExportOptions } from "./compose.js";
 import { utf8 } from "./crypto.js";
 import { verifyEvidenceBundle } from "./evidence.js";
-import type { EvidenceBundleResult, ExportResult } from "./evidence.js";
+import type { AttestationRecord, EvidenceBundle, EvidenceBundleResult, ExportResult } from "./evidence.js";
 
 const EXIT_VERIFIED = 0;
 const EXIT_FAILED = 1;
@@ -69,6 +71,9 @@ export async function runCli(argv: string[], io: Cli): Promise<number> {
   if (command === "version" || command === "--version" || command === "-v") {
     io.out("@ar.io/proof verify CLI");
     return EXIT_VERIFIED;
+  }
+  if (command === "export") {
+    return runExport(rest, io);
   }
   if (command !== "verify") {
     io.err(`unknown command: ${command}`);
@@ -179,6 +184,208 @@ export async function runCli(argv: string[], io: Cli): Promise<number> {
   return reportEvidence(result, bundlePath, gateways, io);
 }
 
+// `proof export <source-bundle.json> --attestations <f> --key <f> [-o <out>]`
+//
+// Compose a signed, offline-verifiable ario.evidence.export/v1 artifact from a
+// source ario.anchor.trace/v1 bundle + operator attestation records + an exporter
+// Ed25519 key (evidence-export.md §5, composer). Writes the export to `-o <out>`
+// (or stdout when omitted, so it can be piped straight into `proof verify`).
+//
+// Exit codes: 0 composed OK · 1 the recomputed export is FAILED (a bad source or
+// forged/mis-bound attestation — the composer refuses to emit a green artifact
+// over failing evidence) · 2 usage / malformed input (missing flag, unreadable
+// or non-JSON input, bad exporter key, malformed attestation record).
+async function runExport(rest: string[], io: Cli): Promise<number> {
+  let attestationsPath: string | undefined;
+  let keyPath: string | undefined;
+  let outPath: string | undefined;
+  const opts: ComposeExportOptions = {};
+  const positional: string[] = [];
+
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!;
+    const takeNext = (flag: string): string | undefined => {
+      const next = rest[i + 1];
+      if (next === undefined) {
+        io.err(`export: ${flag} requires a value`);
+        return undefined;
+      }
+      i++;
+      return next;
+    };
+    if (a === "--attestations" || a === "-a") {
+      const v = takeNext(a);
+      if (v === undefined) return usageExport(io);
+      attestationsPath = v;
+    } else if (a === "--key" || a === "-k") {
+      const v = takeNext(a);
+      if (v === undefined) return usageExport(io);
+      keyPath = v;
+    } else if (a === "--out" || a === "-o") {
+      const v = takeNext(a);
+      if (v === undefined) return usageExport(io);
+      outPath = v;
+    } else if (a === "--issuer-id") {
+      const v = takeNext(a);
+      if (v === undefined) return usageExport(io);
+      opts.issuerId = v;
+    } else if (a === "--gateway") {
+      const v = takeNext(a);
+      if (v === undefined) return usageExport(io);
+      opts.gateway = v;
+    } else if (a === "--previous-hash") {
+      const v = takeNext(a);
+      if (v === undefined) return usageExport(io);
+      opts.previousHash = v;
+    } else if (a === "--generated-at") {
+      const v = takeNext(a);
+      if (v === undefined) return usageExport(io);
+      opts.generatedAt = v;
+    } else {
+      positional.push(a);
+    }
+  }
+
+  const [bundlePath] = positional;
+  if (!bundlePath) {
+    io.err("export: a source bundle file path is required");
+    return usageExport(io);
+  }
+  if (!attestationsPath) {
+    io.err("export: --attestations <file> is required");
+    return usageExport(io);
+  }
+  if (!keyPath) {
+    io.err("export: --key <file> is required");
+    return usageExport(io);
+  }
+
+  const sourceBundle = await readJson<EvidenceBundle>(bundlePath, io);
+  if (sourceBundle === undefined) return EXIT_MALFORMED;
+  const attestationsRaw = await readJson<unknown>(attestationsPath, io);
+  if (attestationsRaw === undefined) return EXIT_MALFORMED;
+  const attestations = coerceAttestations(attestationsRaw);
+  if (attestations === undefined) {
+    io.err(`export: ${attestationsPath} must be a JSON array of attestation records ` +
+      `(or an object with an "attestations" array)`);
+    return EXIT_MALFORMED;
+  }
+
+  const privateKey = await readExporterKey(keyPath, io);
+  if (privateKey === undefined) return EXIT_MALFORMED;
+
+  let composed;
+  try {
+    composed = await composeExport(sourceBundle, attestations, { privateKey }, opts);
+  } catch (e) {
+    io.err(`export: cannot compose — ${e instanceof Error ? e.message : String(e)}`);
+    return EXIT_MALFORMED;
+  }
+
+  // The composer refuses to hand back a green artifact over failing evidence: a
+  // FAILED recompute (bad source / forged / mis-bound attestation) exits 1 and
+  // still writes the artifact so the caller can inspect it.
+  const serialized = JSON.stringify(composed.bundle, null, 2) + "\n";
+  if (outPath) {
+    try {
+      await writeFile(outPath, serialized, "utf8");
+    } catch (e) {
+      io.err(`export: cannot write ${outPath}: ${e instanceof Error ? e.message : String(e)}`);
+      return EXIT_MALFORMED;
+    }
+    io.out(
+      `${paint("exported", composed.status === "failed" ? R : G)} ${outPath}  ` +
+        `status ${composed.status}  ` +
+        `attestations ${composed.boundAttestations}/${attestations.length} bound`,
+    );
+  } else {
+    io.out(serialized.replace(/\n$/, ""));
+  }
+  return composed.status === "failed" ? EXIT_FAILED : EXIT_VERIFIED;
+}
+
+function usageExport(io: Cli): number {
+  io.out(
+    "Usage: npx @ar.io/proof export <source-bundle.json> --attestations <file> --key <file> [-o <out.json>]",
+  );
+  io.out("");
+  io.out("Compose a signed, offline-verifiable ario.evidence.export/v1 artifact from an");
+  io.out("ario.anchor.trace/v1 source bundle + operator attestation records + an exporter");
+  io.out("Ed25519 key. The output verifies with `proof verify <out.json>`.");
+  io.out("");
+  io.out("--attestations <file>  JSON array of attestation records (or {attestations:[...]}).");
+  io.out("--key <file>           Exporter Ed25519 key: a 32-byte hex seed, or JSON");
+  io.out('                       {"privateKey":"<hex>"} / {"seed":"<hex>"}.');
+  io.out("-o, --out <file>       Write the export here (default: stdout).");
+  io.out("--issuer-id <id>       Wrapper issuer.issuer_id (default ar-io-verify).");
+  io.out("--gateway <url>        Named delivery surface (not trusted).");
+  io.out("--previous-hash <h>    Custody pointer (default GENESIS).");
+  io.out("--generated-at <ts>    RFC 3339 compose time (default now).");
+  return EXIT_MALFORMED;
+}
+
+// Read + parse a JSON file; report a clear error and return undefined on any
+// failure (mirrors the verify path's read/parse error handling → exit 2).
+async function readJson<T>(path: string, io: Cli): Promise<T | undefined> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (e) {
+    io.err(`cannot read ${path}: ${e instanceof Error ? e.message : String(e)}`);
+    return undefined;
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (e) {
+    io.err(`${path} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+    return undefined;
+  }
+}
+
+// Accept either a bare array of attestation records or an object wrapping one
+// under `attestations`. Returns undefined for anything else.
+function coerceAttestations(raw: unknown): AttestationRecord[] | undefined {
+  if (Array.isArray(raw)) return raw as AttestationRecord[];
+  if (raw !== null && typeof raw === "object") {
+    const inner = (raw as { attestations?: unknown }).attestations;
+    if (Array.isArray(inner)) return inner as AttestationRecord[];
+  }
+  return undefined;
+}
+
+// Read the exporter Ed25519 key: a file that is either a bare 32-byte hex seed
+// (whitespace-trimmed) or a JSON object carrying it under `privateKey` / `seed` /
+// `private_key`. Validates the 64-hex-char (32-byte) shape.
+async function readExporterKey(path: string, io: Cli): Promise<string | undefined> {
+  let raw: string;
+  try {
+    raw = (await readFile(path, "utf8")).trim();
+  } catch (e) {
+    io.err(`export: cannot read --key ${path}: ${e instanceof Error ? e.message : String(e)}`);
+    return undefined;
+  }
+  let seed = raw;
+  if (raw.startsWith("{")) {
+    try {
+      const obj = JSON.parse(raw) as Record<string, unknown>;
+      const found = obj.privateKey ?? obj.seed ?? obj.private_key;
+      if (typeof found !== "string") {
+        io.err(`export: --key ${path} JSON needs a string "privateKey"/"seed" field`);
+        return undefined;
+      }
+      seed = found.trim();
+    } catch (e) {
+      io.err(`export: --key ${path} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
+    }
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(seed)) {
+    io.err(`export: --key must be a 32-byte (64 hex char) Ed25519 seed`);
+    return undefined;
+  }
+  return seed.toLowerCase();
+}
+
 // The --logs side-input lane decides each disclosed value's encoding: a clean,
 // even-length, lowercase-hex string is hex bytes; anything else is utf8 text.
 // (The verifier itself only distinguishes "string ⇒ hex" from "Uint8Array ⇒
@@ -189,11 +396,16 @@ function decodeLogValue(v: string): Uint8Array | string {
 }
 
 function printUsage(io: Cli): void {
-  io.out("Usage: npx @ar.io/proof verify <bundle.json> [gateway1,gateway2,...] [--logs <logs.json>]");
+  io.out("Usage: npx @ar.io/proof <command> [args]");
   io.out("");
-  io.out("Verify an ario.evidence/v1 (ario.anchor.trace/v1) bundle or an");
-  io.out("ario.agent.proof/v1 inclusion bundle, fully offline. Supply a");
-  io.out("comma-separated gateway list to also re-fetch each checkpoint on-chain.");
+  io.out("Commands:");
+  io.out("  verify <bundle.json> [gateways] [--logs <logs.json>]   Verify a bundle/export");
+  io.out("  export <source.json> --attestations <f> --key <f> [-o] Compose an attested export");
+  io.out("");
+  io.out("Verify an ario.evidence/v1 (ario.anchor.trace/v1) bundle, an");
+  io.out("ario.evidence.export/v1 attested export, or an ario.agent.proof/v1");
+  io.out("inclusion bundle, fully offline. Supply a comma-separated gateway list");
+  io.out("to also re-fetch each checkpoint on-chain.");
   io.out("");
   io.out("--logs <logs.json>  Bind disclosed raw logs to each event's committed");
   io.out("                    content_hash. JSON object mapping event_id → bytes");
