@@ -16,7 +16,7 @@
 
 import { hexToBytes, utf8 } from "./crypto.js";
 import { leafHash, verifyInclusion } from "./merkle.js";
-import { jcs, verifyEnvelope } from "./verifier.js";
+import { MAX_CANONICAL_DEPTH, exceedsDepth, jcs, verifyEnvelope } from "./verifier.js";
 import type { Envelope } from "./types.js";
 
 export const AGENT_PROOF_SPEC_PREFIX = "ario.agent.proof/v1";
@@ -84,6 +84,14 @@ export async function verifyAgentProofBundle(
 
   if (bundle === null || typeof bundle !== "object" || Array.isArray(bundle)) {
     return fail("agent proof bundle is not a JSON object");
+  }
+  // Bound nesting before any canonicalization (checkpoint envelope + Merkle
+  // leaves are canonicalized recursively) — a fixed shared limit keeps this a
+  // `malformed` verdict in every kernel. See MAX_CANONICAL_DEPTH.
+  if (exceedsDepth(bundle, MAX_CANONICAL_DEPTH)) {
+    return fail(
+      `agent proof bundle nesting exceeds the ${MAX_CANONICAL_DEPTH}-level canonicalization depth bound`,
+    );
   }
   const b = bundle as AgentProofBundle;
   if (!isAgentProofSpec(b.spec_version)) {

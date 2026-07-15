@@ -25,7 +25,13 @@ import {
   verifyRsaPssSha256,
 } from "./crypto.js";
 import { leafHash, verifyInclusion } from "./merkle.js";
-import { contentHashes, jcs, verifyEnvelope } from "./verifier.js";
+import {
+  MAX_CANONICAL_DEPTH,
+  contentHashes,
+  exceedsDepth,
+  jcs,
+  verifyEnvelope,
+} from "./verifier.js";
 import type { Envelope } from "./types.js";
 
 // Only the evidence-bundle major(s) this kernel verifies. A new major is a
@@ -390,6 +396,15 @@ export async function verifyEvidenceBundle(
   // --- Step 1: parse + reject unknown spec_version major ---------------------
   if (bundle === null || typeof bundle !== "object" || Array.isArray(bundle)) {
     return malformed("evidence bundle is not a JSON object");
+  }
+  // Reject a pathologically deep bundle BEFORE any canonicalization (which
+  // recurses). A fixed shared bound keeps this a `malformed` verdict in every
+  // kernel rather than a stack-limit-dependent split verdict — see
+  // MAX_CANONICAL_DEPTH.
+  if (exceedsDepth(bundle, MAX_CANONICAL_DEPTH)) {
+    return malformed(
+      `evidence bundle nesting exceeds the ${MAX_CANONICAL_DEPTH}-level canonicalization depth bound`,
+    );
   }
   const b = bundle as EvidenceBundle;
   const specVersionOk = isEvidenceMajorAccepted(b.spec_version);

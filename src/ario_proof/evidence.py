@@ -29,7 +29,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
 
-from .canonicalize import canonical_json
+from .canonicalize import MAX_CANONICAL_DEPTH, canonical_json, exceeds_depth
 from .envelope import content_hashes, verify_envelope
 from .hash import sha256_hex
 from .merkle import leaf_hash, verify_inclusion
@@ -288,6 +288,15 @@ def verify_evidence_bundle(
     # --- Step 1: parse + reject unknown spec_version major ---------------------
     if not isinstance(bundle, dict):
         return _malformed("evidence bundle is not a JSON object")
+    # Reject a pathologically deep bundle BEFORE any canonicalization (which
+    # recurses). A fixed shared bound keeps this a ``malformed`` verdict in every
+    # kernel rather than a recursion-limit-dependent split verdict — see
+    # MAX_CANONICAL_DEPTH.
+    if exceeds_depth(bundle, MAX_CANONICAL_DEPTH):
+        return _malformed(
+            f"evidence bundle nesting exceeds the {MAX_CANONICAL_DEPTH}-level "
+            "canonicalization depth bound"
+        )
     b = bundle
     spec_version_ok = _matches_evidence_major(b.get("spec_version"))
     if not spec_version_ok:
