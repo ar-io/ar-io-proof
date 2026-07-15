@@ -1,0 +1,174 @@
+{
+  "vector_id": "evidence-export-source-bundle-ref",
+  "class": "source-bundle-ref-offline",
+  "description": "Inline source_bundle removed, replaced by a source_bundle_ref, wrapper re-signed. The referenced bytes are unavailable offline -> source-dependent checks UNDETERMINED (not a failure). Exit 3.",
+  "expected": {
+    "status": "partial",
+    "exit_code": 3,
+    "signature_ok": true,
+    "body_hash_ok": true
+  },
+  "bundle": {
+    "spec_version": "ario.evidence/v1",
+    "body_type": "ario.evidence.export/v1",
+    "issuer": {
+      "kind": "issuer",
+      "issuer_id": "ar-io-verify:fixture-instance"
+    },
+    "generated_at": "2026-07-15T00:00:00Z",
+    "gateway": null,
+    "verdict": {
+      "status": "verified",
+      "summary": "Source bundle verified (3 events across 1 checkpoint); 2 operator attestations valid; on-chain confirmed on 1/2 gateways.",
+      "counts": {
+        "verified": 5,
+        "failed": 0,
+        "undetermined": 0
+      },
+      "as_of": "2026-07-15T00:00:00Z"
+    },
+    "body": {
+      "kernel_verdict": {
+        "schema_version": "ario.evidence.verdict/v1",
+        "status": "verified",
+        "summary": "Source bundle verified (3 events across 1 checkpoint); 2 operator attestations valid; on-chain confirmed on 1/2 gateways.",
+        "counts": {
+          "verified": 5,
+          "failed": 0,
+          "undetermined": 0
+        },
+        "as_of": "2026-07-15T00:00:00Z",
+        "events": [
+          {
+            "event_id": "00000000-0000-4000-8000-000000000000",
+            "signature_ok": true,
+            "payload_bound": true,
+            "inclusion_ok": true,
+            "content_ok": true,
+            "status": "verified"
+          },
+          {
+            "event_id": "00000000-0000-4000-8000-000000000001",
+            "signature_ok": true,
+            "payload_bound": true,
+            "inclusion_ok": true,
+            "content_ok": null,
+            "status": "verified"
+          },
+          {
+            "event_id": "00000000-0000-4000-8000-000000000002",
+            "signature_ok": true,
+            "payload_bound": true,
+            "inclusion_ok": true,
+            "content_ok": null,
+            "status": "verified"
+          }
+        ],
+        "checkpoints": [
+          {
+            "checkpoint_tx_id": "eKpT-eXpOrT-fIxTuRe-cHeCkPoInT-tX-000000001",
+            "merkle_root_ok": true,
+            "on_chain": {
+              "rollup": "confirm",
+              "on_chain_ok": true,
+              "per_gateway": [
+                {
+                  "gateway": "https://g1.example",
+                  "outcome": "confirm",
+                  "block_height": 1512345
+                },
+                {
+                  "gateway": "https://g2.example",
+                  "outcome": "unreachable"
+                }
+              ]
+            },
+            "attestations": [
+              {
+                "operator": "TSLOrNneCqJ3V--Tbj_VSF0-gtygIffQCB-2kbrXNpY",
+                "gateway": "https://g1.example",
+                "signature_ok": true,
+                "operator_address_bound": true,
+                "data_hash_bound": true,
+                "level": 3,
+                "subject_ref_ok": null
+              },
+              {
+                "operator": "IcVikJhd8lNbuk9k9SKvUSAIJJB51HTxhdgbg--wlPA",
+                "gateway": "https://g2.example",
+                "signature_ok": true,
+                "operator_address_bound": true,
+                "data_hash_bound": true,
+                "level": 2,
+                "subject_ref_ok": null
+              }
+            ]
+          }
+        ],
+        "custody_chain": null
+      },
+      "source_bundle_hash": "9f9a72cbe5c8ce30e7e6f97660e50aaf18b0e9c2d69ce9dcbcf682c65d8ea5fe",
+      "attestations": [
+        {
+          "checkpoint_tx_id": "eKpT-eXpOrT-fIxTuRe-cHeCkPoInT-tX-000000001",
+          "payload": {
+            "attested_at": "2026-07-15T00:00:00.000Z",
+            "tx_id": "eKpT-eXpOrT-fIxTuRe-cHeCkPoInT-tX-000000001",
+            "data_hash": "5e6967579a65128bdf01b5874653514824493732f45a1985d1abe2d7e61bfeec",
+            "data_size": 4096,
+            "block_height": 1512345,
+            "block_timestamp": 1752537600,
+            "operator": "TSLOrNneCqJ3V--Tbj_VSF0-gtygIffQCB-2kbrXNpY",
+            "owner_address": "b3duZXJfYWRkcmVzc19wbGFjZWhvbGRlcl9fMDAwMDAwMDAwMDA",
+            "gateway": "https://g1.example",
+            "signature_verified": true,
+            "level": 3,
+            "subject_ref": {
+              "hash": "9fd66070e10a1d7d260e6512abf6364f55101d35207db6161b638fd4cbd083fd",
+              "type": "document"
+            },
+            "attestation_version": "ario.evidence.attestation/v1"
+          },
+          "signature_alg": "rsa-pss-sha256",
+          "public_key": {
+            "kty": "RSA",
+            "n": "2ckm8PyfZg17DT9FZI5fzWP_0dEgwrzcPF4FhEPqFMokMLMohbudTjQHgYu_jBQ18k6pNtZ6lql7tjpZ3BWj9ozyGMA9HvddMPM4Ji6ggmXmeYutFqJFlmMgE1_3AroDTDJI2dqQVuiSF2ssz80hWLfqiewAQ1vJFWI0IokL43ZkGqsPmFOgAQgCMUlGkHTSpFYg1yWQxIOS-E0JglzVlYzV_hjVtuM0N85fp4TijCl9UkKrwBS10UQYO2I_Iq91LPgsIsemHWUA1-9HwjVZ2_EGxI1j6xXvET5Yt1QT_7yVpszChNMurLt3-lQBoDPDQWUCPgRZIKPmxYYPGm6byw",
+            "e": "AQAB"
+          },
+          "signature": "1902a45c286d2c1a20c9ccf40617969e3103a24a90d1e4d81f6ca5e7b1204804ad0ba586b5fb4de14f3a201daf951c4822eb8cdb84b4ebbce6beeeba6d2fd1559161b078b61fd2b75af8730153f41afb3182070c922ed5cdf15107981dc9ffc1095ab29bf6c03eb5232ae4a899c28353184b364890230bfbfeb9ad1bd839cf9d4d323bbc9c9ef20cecfab8533ce7ad515b684385a7e62962f85d44957a8710693d6971a76a9f483cdbd3f08a7add5e53c6302f7fd09965a8ea6fc13ec05b3ce1385000d3aa06dd1ef6e6c16bf7e7605b0a46eba80a2f553d0dd94879b60e540f6c6b3315aef2c6f2819f4410415a57b68aace3f95a4e16265d0509060100c9aa"
+        },
+        {
+          "checkpoint_tx_id": "eKpT-eXpOrT-fIxTuRe-cHeCkPoInT-tX-000000001",
+          "payload": {
+            "attested_at": "2026-07-15T00:05:00.000Z",
+            "tx_id": "eKpT-eXpOrT-fIxTuRe-cHeCkPoInT-tX-000000001",
+            "data_hash": "5e6967579a65128bdf01b5874653514824493732f45a1985d1abe2d7e61bfeec",
+            "data_size": 4096,
+            "block_height": 1512345,
+            "block_timestamp": 1752537600,
+            "operator": "IcVikJhd8lNbuk9k9SKvUSAIJJB51HTxhdgbg--wlPA",
+            "owner_address": "b3duZXJfYWRkcmVzc19wbGFjZWhvbGRlcl9fMDAwMDAwMDAwMDA",
+            "gateway": "https://g2.example",
+            "signature_verified": true,
+            "level": 2,
+            "attestation_version": "ario.evidence.attestation/v1"
+          },
+          "signature_alg": "rsa-pss-sha256",
+          "public_key": {
+            "kty": "RSA",
+            "n": "ppO0BhugK7SI7Y15dk4kmnw87K7SDGsmPiOdfRGadPsuU6WnOThdMUuEb1UZs5QZFzvx3BPxCP5bm-9Xx0v_nuhNUpl1OrJyLO-AHBLUt0cG5Qb25cLywd9WhXogXsAXEorhs1HLOwo980jKsHHe6YWA6zTp1s-2IXQRstogND1qfIoYOQkCiCCg0iIen8CUrgpCYPfiKTDRNFEYnrrlbJmqX7DAwDAxFoqaKNoUozdMjvok88bJZq6AMT6pdrdBsl9rxnjUrAyC7CFuOoef5wtJ4_QdsBINrUXAs4_TvxIp8Tvu6mX6gh918jRbNlGY9uRJd2AbvKgK--uLgZDmGw",
+            "e": "AQAB"
+          },
+          "signature": "41cf6b09e2eae34b9a865c11601511d1eafece5fd68180e6d4ff185b2d3e16aa855336cde16c959b4493d34378d89f6dcd9736d75cd06fa96647a37b0c5c07a3c16dd39fc6476c4c80375d5032231eef53b0ccc18507c615001d2bda416ea8574f77d248ff46ba2bc5a7112aba1ea504787ccb6575205111609d66ee01fcef04374822a969f64bfcf182d5d255ecd79822ee16006ec83aed69e38b587f0181cf1589bdb0e05b412a39a82145152b35b5318d0d30b57926c6083b3cd0befb36843226873665712a25d84b6577a8e91663283beb8726ef52b6d5b076d3af111c86b04c8b8609d69a65553ddbc52c11f120cbe38822a1ad2b4c4ba9d053762126a2"
+        }
+      ],
+      "export_schema": "ario.evidence.export/v1",
+      "source_bundle_ref": "ar://some-large-source-bundle-txid"
+    },
+    "body_hash": "2928932d33da18acf4e7aa3e79ffa42251f59269c62f51d6f20cea8c7c5247eb",
+    "previous_hash": "GENESIS",
+    "signature_alg": "ed25519",
+    "public_key": "207a067892821e25d770f1fba0c47c11ff4b813e54162ece9eb839e076231ab6",
+    "signature": "39c4d26a34e526d0fbda98b26b55ad38c48c95b69b7bdb4e4f3a2c0e6b3a306c2f9716d3c2fd21cc4de439c24921c5bfd7e3ede80a4b8b68f790f8d0354d8802"
+  }
+}
