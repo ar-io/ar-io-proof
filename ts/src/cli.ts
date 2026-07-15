@@ -22,7 +22,7 @@ import { isAgentProofSpec, verifyAgentProofBundle } from "./agent-proof.js";
 import type { AgentProofResult } from "./agent-proof.js";
 import { utf8 } from "./crypto.js";
 import { verifyEvidenceBundle } from "./evidence.js";
-import type { EvidenceBundleResult } from "./evidence.js";
+import type { EvidenceBundleResult, ExportResult } from "./evidence.js";
 
 const EXIT_VERIFIED = 0;
 const EXIT_FAILED = 1;
@@ -252,6 +252,10 @@ function reportEvidence(
     }
   }
 
+  if (result.export) {
+    reportExport(result.export, io);
+  }
+
   io.out("");
   printRollup(result.status, result.assertedStatus, gateways, result.onChainChecked, io);
   for (const e of result.errors) io.out(paint(`  note: ${e}`, DIM));
@@ -263,6 +267,28 @@ function reportEvidence(
   }
 
   return mapStatusToExit(result.status, result.errors);
+}
+
+// Render the export-specific block (evidence-export.md §5): source-bundle
+// linkage, cached-vs-recomputed verdict agreement, and each embedded operator
+// attestation (RSA-PSS sig · operator-address binding · data_hash binding).
+function reportExport(exp: ExportResult, io: Cli): void {
+  io.out("");
+  io.out(paint("  Attested export", DIM));
+  io.out(
+    `    source linkage ${mark(exp.sourceLinkageOk)}  verdict agreement ${mark(exp.verdictAgreementOk)}`,
+  );
+  if (exp.attestations.length > 0) {
+    io.out(paint("    Operator attestations", DIM));
+    for (const a of exp.attestations) {
+      const subj = a.subjectRefOk === null ? "" : `  subject ${mark(a.subjectRefOk)}`;
+      io.out(
+        `      ${mark(a.ok)} ${shortId(a.operator)}  sig ${mark(a.signatureOk)}` +
+          `  operator ${mark(a.operatorAddressBound)}  data_hash ${mark(a.dataHashBound)}${subj}`,
+      );
+      for (const e of a.errors) io.out(paint(`          - ${e}`, R));
+    }
+  }
 }
 
 function reportAgentProof(
@@ -329,8 +355,13 @@ function printRollup(
 function mapStatusToExit(status: string, errors: string[]): number {
   if (status === "failed") return EXIT_FAILED;
   if (status === "malformed") return EXIT_MALFORMED;
-  // "partial" caused specifically by an unreachable gateway maps to exit 3.
-  if (status === "partial" && errors.some((e) => /unreachable|could not be re-fetched/.test(e))) {
+  // "partial" caused specifically by an unreachable gateway — or an export
+  // source_bundle_ref whose bytes are unavailable offline (evidence-export.md
+  // §5 step 3) — maps to exit 3 (undetermined, network-dependent).
+  if (
+    status === "partial" &&
+    errors.some((e) => /unreachable|could not be re-fetched|unavailable offline/.test(e))
+  ) {
     return EXIT_GATEWAY_UNAVAILABLE;
   }
   // "verified" → 0. "partial" from a withheld record (semantics-undetermined,

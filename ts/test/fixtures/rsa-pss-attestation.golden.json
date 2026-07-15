@@ -1,0 +1,26 @@
+{
+  "_comment": "Frozen RSA-PSS-SHA-256 operator-attestation golden fixture. Regenerate with scripts/gen-rsa-attestation-fixture.mjs. signature_hex is over utf8(JCS(payload)) with salt length = 32 (RSA_PSS_SALTLEN_DIGEST); signature_wrong_salt_hex is the same over max salt (the un-verifiable RSA_PSS_SALTLEN_AUTO trap).",
+  "algorithm": "rsa-pss-sha256",
+  "salt_length": 32,
+  "public_key": {
+    "kty": "RSA",
+    "n": "wHM8UUVhrBiWmbOVkhjfh84-D1-mHkoourSX-uWUHYidMZzDmz7U6YLy1fRpYlImiLkNQHZQuNoo5W5cEULUCUehuPhBB-zfgfMYTGCCJ6fta-_SGeilKXQo_oskdonBIgxVN1DoIA36m8V5VpoCQzAvnhZ50iYHCgEb-Ne7j0GGP64O7zT5DVCrFQ81WeASclaftcTCNDc-mR-QqiHAZDwdhV0J15pdclZhfN_gpMm9Hpy5piRhz4JSzQ4UsA-uRQnwLf7863CIl4VOAiyKzjjeqxAyDCiofFB0NHWtiG2Jtc_AEdXzrbdMU33AuTVo34aM6YfA3q3CFOIrc4eq2w",
+    "e": "AQAB"
+  },
+  "operator_address": "mVzE7I-fZpmQ2FZuQD9rdsigCxFBqfZQXb4Qx972J4s",
+  "payload": {
+    "tx_id": "Zm9vYmFyX3R4X2lkX3BsYWNlaG9sZGVyX18wMDAwMDAwMQ",
+    "data_hash": "dc6eb4bcc453159d9ceb15489cee3f5c6edd77d12089da4242398242c8032fc8",
+    "data_size": 4096,
+    "block_height": 1500123,
+    "block_timestamp": 1752537600,
+    "attested_at": "2026-07-15T00:00:00Z",
+    "operator": "mVzE7I-fZpmQ2FZuQD9rdsigCxFBqfZQXb4Qx972J4s",
+    "owner_address": "b3duZXJfYWRkcmVzc19wbGFjZWhvbGRlcl9fMDAwMDAwMDAwMDA",
+    "gateway": "https://operator-gateway.example",
+    "signature_verified": true,
+    "attestation_version": "ario.evidence.attestation/v1"
+  },
+  "signature_hex": "0d757901ec2e4811883a4c51dc5ae12ed53f100786d72fe193a193a9ce5515d37fb4d5cbb424413b5f3074aba5f482108ae2796f7c4e4b510c69346537b5b0a01e0d6600a0c6a4e1bc66f16144acaadac8eddb820650c4cdbde1e6eb5980ffddb64d90769dbe80f12ca686273b668221b3d49cdb9526de95e2275ee9ca195eb11654c0f00cf85a52e69ce342bec2eb2c28d701724f623ff3a510dd709762fb96ca12b92ab5852c4668ea496e4a570ce7a3658bd18a36cad0e64dea99f0829bfbdd553167cb135cb8f8d2d9925fe71d6020d9b078da471ec26a3767e04504143741f7757b0cf8f0a50c2f422e35967d1cf788fa2e1d985895984ece5f867b3be4",
+  "signature_wrong_salt_hex": "5479380308139c30999e1acf3bc984ad14be5b8584a6e4aca1971d309343ffdeedb3279d26d23e5f5f7ddf3de558412b41e0e7932f3f1ad0bdd7a6a32dc86be6494be8d7a51ba78bd50ffc5a93f8d7ee74b7ee3be4e4bb95c5535c2bdc10387a38672fc567d01b182dfd63da86715527536606909699d4fae54fa05d145b706a56467aa883c694c5611b1693c762b09353c765b2f75486d09f8d9a5f6f55cc2acb6f794c603b3b387110f19288c6f9815ccdfecf5e2d5ca22972ddde5fcc3dfcdd281c8fcf6dfa5e19bdf82881c2ef5ed2459fbca7fe436be2b5d9cf24d51d213be8a5e375fcb19e98dba868b65b66721a7b7e9f161454d97aef663acc9d659e"
+}
