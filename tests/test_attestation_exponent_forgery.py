@@ -36,3 +36,15 @@ def test_exponent_guard_rejects_e1() -> None:
 def test_full_forged_export_fails() -> None:
     forged = json.loads(_FORGERY.read_text())
     assert _status(verify_evidence_bundle(forged)) == "failed"
+
+
+def test_exponent_guard_rejects_even_e() -> None:
+    # An EVEN exponent is the cross-kernel divergence case: pyca rejects even e
+    # at key construction ("e must be >= 3 and < n") -> would be `malformed`,
+    # while WebCrypto imports it -> would be a `failed` verify. The exponent
+    # guard short-circuits BOTH kernels to False (clean FAILED) BEFORE key
+    # import, so e=2 agrees cross-kernel. It must return False, NOT raise --
+    # raising is the malformed signal this guard keeps the kernels from
+    # diverging on. Mirrors the e=2 case in attestation-exponent-forgery.test.ts.
+    key = {"kty": "RSA", "n": "sQ", "e": "Ag"}  # e = 2 (even)
+    assert verify_rsa_pss_sha256(b"any bytes", "00", key) is False
